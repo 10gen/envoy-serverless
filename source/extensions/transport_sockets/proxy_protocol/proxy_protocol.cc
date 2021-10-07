@@ -6,6 +6,7 @@
 #include "envoy/network/transport_socket.h"
 
 #include "source/common/buffer/buffer_impl.h"
+#include "source/common/common/hex.h"
 #include "source/common/network/address_impl.h"
 #include "source/extensions/common/proxy_protocol/proxy_protocol_header.h"
 
@@ -64,14 +65,22 @@ void UpstreamProxyProtocolSocket::generateHeaderV1() {
   Common::ProxyProtocol::generateV1Header(*src_addr->ip(), *dst_addr->ip(), header_buffer_);
 }
 
+namespace {
+std::string toHex(const Buffer::Instance& buffer) {
+  std::string bufferStr = buffer.toString();
+  return Hex::encode(reinterpret_cast<uint8_t*>(bufferStr.data()), bufferStr.length());
+}
+} // namespace
+
 void UpstreamProxyProtocolSocket::generateHeaderV2() {
   if (!options_ || !options_->proxyProtocolOptions().has_value()) {
     Common::ProxyProtocol::generateV2LocalHeader(header_buffer_);
   } else {
     const auto options = options_->proxyProtocolOptions().value();
-    Common::ProxyProtocol::generateV2Header(*options.src_addr_->ip(), *options.dst_addr_->ip(),
-                                            header_buffer_);
+    Common::ProxyProtocol::generateV2Header(options, header_buffer_);
   }
+  ENVOY_LOG(trace, fmt::format("generated proxy protocol v2 header, length: {}, buffer: {}",
+                               header_buffer_.length(), toHex(header_buffer_)));
 }
 
 Network::IoResult UpstreamProxyProtocolSocket::writeHeader() {
