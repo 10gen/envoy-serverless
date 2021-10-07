@@ -56,6 +56,11 @@ public:
   const KeyValuePair* isTlvTypeNeeded(uint8_t type) const;
 
   /**
+   * Return true if the type of TLV is needed for pass-through.
+   */
+  bool isPassThroughTlvTypeNeeded(uint8_t type) const;
+
+  /**
    * Number of TLV types that need to be parsed and saved to dynamic metadata.
    */
   size_t numberOfNeededTlvTypes() const;
@@ -128,11 +133,15 @@ private:
   size_t search_index_{1};
 
   ProxyProtocolVersion header_version_{Unknown};
-
+ 
   ConfigSharedPtr config_;
 
   absl::optional<WireHeader> proxy_protocol_header_;
   size_t max_proxy_protocol_len_{MAX_PROXY_PROTO_LEN_V2};
+
+  // Store the parsed proxy protocol TLVs.
+  Network::ProxyProtocolTLVVector parsed_tlvs_;
+
 };
 
 } // namespace ProxyProtocol
