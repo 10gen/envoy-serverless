@@ -414,9 +414,8 @@ bool Filter::parseTlvs(const std::vector<uint8_t>& tlvs) {
 }
 
 ReadOrParseState Filter::readExtensions(Network::IoHandle& io_handle) {
-  // Parse and discard the extensions if this is a local command or there's no TLV needs to be saved
-  // to metadata.
-  if (proxy_protocol_header_.value().local_command_ || 0 == config_->numberOfNeededTlvTypes()) {
+  // Parse and discard the extensions if this is a local command.
+  if (proxy_protocol_header_.value().local_command_) {
     // buf_ is no longer in use so we re-use it to read/discard.
     return parseExtensions(io_handle, reinterpret_cast<uint8_t*>(buf_), sizeof(buf_), nullptr);
   }
