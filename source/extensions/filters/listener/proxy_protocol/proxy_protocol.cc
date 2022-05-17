@@ -414,9 +414,9 @@ ReadOrParseState Filter::readExtensions(Network::ListenerFilterBuffer& buffer) {
     return ReadOrParseState::TryAgainLater;
   }
 
-  if (proxy_protocol_header_.value().local_command_ || 0 == config_->numberOfNeededTlvTypes()) {
-    // Ignores the extensions if this is a local command or there's no TLV needs to be saved
-    // to metadata. Those will drained from the buffer in the end.
+  if (proxy_protocol_header_.value().local_command_) {
+    // Ignores the extensions if this is a local command. Those will drained from
+    // the buffer in the end.
     return ReadOrParseState::Done;
   }
 
