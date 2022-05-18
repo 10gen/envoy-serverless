@@ -17,6 +17,7 @@
 #include "source/common/common/assert.h"
 #include "source/common/common/empty_string.h"
 #include "source/common/common/fmt.h"
+#include "source/common/common/hex.h"
 #include "source/common/common/safe_memcpy.h"
 #include "source/common/common/utility.h"
 #include "source/common/network/address_impl.h"
@@ -128,6 +129,19 @@ ReadOrParseState Filter::parseBuffer(Network::ListenerFilterBuffer& buffer) {
   if (proxy_protocol_header_.has_value() &&
       !cb_->filterState().hasData<Network::ProxyProtocolFilterState>(
           Network::ProxyProtocolFilterState::key())) {
+    if (!proxy_protocol_header_.value().local_command_) {
+      auto buf = reinterpret_cast<const uint8_t*>(buffer.rawSlice().mem_);
+      ENVOY_LOG(
+          trace,
+          fmt::format("parsed proxy protocol header, length: {}, buffer: {}, "
+                      "TLV length: {}, TLV buffer: {}",
+                      proxy_protocol_header_.value().wholeHeaderLength(),
+                      Envoy::Hex::encode(buf, proxy_protocol_header_.value().wholeHeaderLength()),
+                      proxy_protocol_header_.value().extensions_length_,
+                      Envoy::Hex::encode(
+                          buf + proxy_protocol_header_.value().headerLengthWithoutExtension(),
+                          proxy_protocol_header_.value().extensions_length_)));
+    }
     cb_->filterState().setData(
         Network::ProxyProtocolFilterState::key(),
         std::make_unique<Network::ProxyProtocolFilterState>(Network::ProxyProtocolData{
