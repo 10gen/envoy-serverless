@@ -17,6 +17,7 @@
 #include "source/common/common/assert.h"
 #include "source/common/common/empty_string.h"
 #include "source/common/common/fmt.h"
+#include "source/common/common/hex.h"
 #include "source/common/common/safe_memcpy.h"
 #include "source/common/common/utility.h"
 #include "source/common/network/address_impl.h"
@@ -114,6 +115,14 @@ ReadOrParseState Filter::onReadWorker() {
   if (proxy_protocol_header_.has_value() &&
       !cb_->filterState().hasData<Network::ProxyProtocolFilterState>(
           Network::ProxyProtocolFilterState::key())) {
+    if (!proxy_protocol_header_.value().local_command_) {
+      ENVOY_LOG(trace,
+                fmt::format("parsed proxy protocol header, length: {}, buffer: {}, "
+                            "TLV length: {}, TLV buffer: {}",
+                            buf_off_,
+                            Envoy::Hex::encode(reinterpret_cast<uint8_t*>(&buf_), buf_off_),
+                            buf_tlv_off_, Envoy::Hex::encode(buf_tlv_.data(), buf_tlv_off_)));
+    }
     cb_->filterState().setData(
         Network::ProxyProtocolFilterState::key(),
         std::make_unique<Network::ProxyProtocolFilterState>(Network::ProxyProtocolData{
@@ -414,9 +423,8 @@ bool Filter::parseTlvs(const std::vector<uint8_t>& tlvs) {
 }
 
 ReadOrParseState Filter::readExtensions(Network::IoHandle& io_handle) {
-  // Parse and discard the extensions if this is a local command or there's no TLV needs to be saved
-  // to metadata.
-  if (proxy_protocol_header_.value().local_command_ || 0 == config_->numberOfNeededTlvTypes()) {
+  // Parse and discard the extensions if this is a local command.
+  if (proxy_protocol_header_.value().local_command_) {
     // buf_ is no longer in use so we re-use it to read/discard.
     return parseExtensions(io_handle, reinterpret_cast<uint8_t*>(buf_), sizeof(buf_), nullptr);
   }
