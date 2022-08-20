@@ -508,6 +508,7 @@ stages:
       env:
         GITHUB_TOKEN: $(GitHubPublicRepoOnlyAccessToken)
 
+<<<<<<< HEAD
   - job: assets
     dependsOn: []
     condition: eq(variables['isTaggedRelease'], 'true')
@@ -576,6 +577,8 @@ stages:
         GITHUB_TOKEN: $(GitHubPublicRepoOnlyAccessToken)
         MAINTAINER_GPG_KEY_PASSPHRASE: $(MaintainerGPGKeyPassphrase)
 
+=======
+>>>>>>> repo: Add automated tagging/publishing (#22578) (#22700)
 - stage: verify
   dependsOn: ["docker"]
   jobs:
