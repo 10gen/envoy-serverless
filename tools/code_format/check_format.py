@@ -86,9 +86,9 @@ JSON_STRING_TO_MESSAGE_ALLOWLIST = (
 # Histogram names which are allowed to be suffixed with the unit symbol, all of the pre-existing
 # ones were grandfathered as part of PR #8484 for backwards compatibility.
 HISTOGRAM_WITH_SI_SUFFIX_ALLOWLIST = (
-    "cx_rtt_us", "cx_rtt_variance_us", "downstream_cx_length_ms", "downstream_cx_length_ms",
-    "initialization_time_ms", "loop_duration_us", "poll_delay_us", "request_time_ms",
-    "upstream_cx_connect_ms", "upstream_cx_length_ms")
+    "downstream_cx_length_ms", "downstream_cx_length_ms", "initialization_time_ms",
+    "loop_duration_us", "poll_delay_us", "request_time_ms", "upstream_cx_connect_ms",
+    "upstream_cx_length_ms")
 
 # Files in these paths can use std::regex
 STD_REGEX_ALLOWLIST = (
