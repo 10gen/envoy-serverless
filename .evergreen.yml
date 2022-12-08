@@ -1,0 +1,28 @@
+tasks:
+- name: compile
+  commands:
+    - command: git.get_project
+      params:
+        directory: src
+    - func: "compile envoy"
+
+functions:
+  "compile envoy":
+    command: subprocess.exec
+    params:
+      binary: bash
+      args:
+      - "src/evergreen/compile.sh"
+
+buildvariants:
+- name: centos7
+  display_name: CentOS 7
+  run_on:
+    - rhel80-xlarge
+  expansions:
+    release: 7
+    image: centos:7
+    arch: x86_64
+  tasks:
+  - name: compile
+
