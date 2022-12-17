@@ -5,6 +5,12 @@ tasks:
       params:
         directory: src
     - func: "compile envoy"
+- name: test
+  commands:
+    - command: git.get_project
+      params:
+        directory: src
+    - func: "test envoy"
 
 functions:
   "compile envoy":
@@ -12,7 +18,13 @@ functions:
     params:
       binary: bash
       args:
-      - "src/evergreen/compile.sh"
+      - "src/evergreen/compile-centos7-evergreen.sh"
+  "test envoy":
+    command: subprocess.exec
+    params:
+      binary: bash
+      args:
+      - "src/evergreen/test-centos7-evergreen.sh"
 
 buildvariants:
 - name: centos7
@@ -25,4 +37,5 @@ buildvariants:
     arch: x86_64
   tasks:
   - name: compile
+  - name: test
 
