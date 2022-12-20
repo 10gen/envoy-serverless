@@ -3,8 +3,7 @@
 # This script runs in a container built from Dockerfile-centos7.
 # It assumes the workspace directory is mounted on /etc/envoy-serverless and the build directory is optionally mounted on /build
 
-set -euo pipefail
-set -x
+set -xeuo pipefail
 
 # Use MongoDB toolchain installed in the docker image.
 export LD_LIBRARY_PATH="/opt/mongodbtoolchain/v4/lib"

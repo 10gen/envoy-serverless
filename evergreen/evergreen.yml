@@ -30,6 +30,7 @@ buildvariants:
 - name: centos7
   display_name: CentOS 7
   run_on:
+    # Tasks run in x86 CentOS7 containers, so the Linux distro doesn't have to match.
     - rhel80-xlarge
   expansions:
     release: 7
