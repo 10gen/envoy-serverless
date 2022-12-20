@@ -1,0 +1,42 @@
+tasks:
+- name: compile
+  commands:
+    - command: git.get_project
+      params:
+        directory: src
+    - func: "compile envoy"
+- name: test
+  commands:
+    - command: git.get_project
+      params:
+        directory: src
+    - func: "test envoy"
+
+functions:
+  "compile envoy":
+    command: subprocess.exec
+    params:
+      binary: bash
+      args:
+      - "src/evergreen/compile-centos7-evergreen.sh"
+  "test envoy":
+    command: subprocess.exec
+    params:
+      binary: bash
+      args:
+      - "src/evergreen/test-centos7-evergreen.sh"
+
+buildvariants:
+- name: centos7
+  display_name: CentOS 7
+  run_on:
+    # Tasks run in x86 CentOS7 containers, so the Linux distro doesn't have to match.
+    - rhel80-xlarge
+  expansions:
+    release: 7
+    image: centos:7
+    arch: x86_64
+  tasks:
+  - name: compile
+  - name: test
+
