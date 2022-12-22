@@ -11,6 +11,12 @@ tasks:
       params:
         directory: src
     - func: "test envoy"
+- name: upload
+  commands:
+    - command: git.get_project
+      params:
+        directory: src
+    - func: "s3 upload release binaries"
 
 functions:
   "compile envoy":
@@ -25,6 +31,17 @@ functions:
       binary: bash
       args:
       - "src/evergreen/test-centos7-evergreen.sh"
+  "s3 upload release binaries":
+    command: s3.put
+    params:
+      aws_key: ${release_aws_key}
+      aws_secret: ${release_aws_secret}
+      bucket: mongodb-mms-build-envoy-serverless
+      local_file: src/README.md
+      remote_file: tarballs/${revision}/README.md
+      permissions: public-read
+      content_type: "text/plain"
+      display_name: README.md
 
 buildvariants:
 - name: centos7
@@ -39,4 +56,5 @@ buildvariants:
   tasks:
   - name: compile
   - name: test
+  - name: upload
 
