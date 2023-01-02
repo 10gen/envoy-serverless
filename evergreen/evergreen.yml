@@ -39,7 +39,8 @@ functions:
       aws_key: ${release_aws_key}
       aws_secret: ${release_aws_secret}
       bucket: mongodb-mms-build-envoy-serverless
-      local_files_include_filter: ["envoy-serverless-*.tar.gz"]
+      local_files_include_filter: ["*.tar.gz"]
+      local_files_include_filter_prefix: "archive"
       remote_file: tarballs/${revision}/
       permissions: public-read
       content_type: "application/x-gzip"
@@ -51,10 +52,6 @@ buildvariants:
   run_on:
     # Tasks run in x86 CentOS7 containers, so the Linux distro doesn't have to match.
     - rhel80-xlarge
-  expansions:
-    release: 7
-    image: centos:7
-    arch: x86_64
   tasks:
   - name: compile
   - name: test

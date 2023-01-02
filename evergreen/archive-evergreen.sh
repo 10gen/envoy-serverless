@@ -1,7 +1,7 @@
 #!/bin/bash
 set -xeuo pipefail
 
-SRCDIR=$(pwd)/envoy-serverless
+SRCDIR=$(pwd)/src
 cd $SRCDIR
 # Generate version from the most recent base tag, e.g. v1.21.3-4-gdbdcfa34cf
 # This example is based on the most recent tag "v1.21.3" and has "4" commits on top of that,
@@ -11,7 +11,8 @@ cd $SRCDIR
 VERSION=$(git describe --tags --dirty --always --match 'v[0-9]*')
 cd -
 
-ARCHIVE_DIR=envoy-serverless-${VERSION}.rhel7.amd64
+ARCHIVE_PATH=archive
+ARCHIVE_DIR=$ARCHIVE_PATH/envoy-serverless-${VERSION}.centos7.amd64
 mkdir -p ${ARCHIVE_DIR}
 # Only include the envoy binary and the hot-restarter. The start script and the static config should
 # be prepared by the agent.
