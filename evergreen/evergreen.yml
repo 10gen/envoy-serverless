@@ -41,7 +41,7 @@ functions:
       bucket: mongodb-mms-build-envoy-serverless
       local_files_include_filter: ["*.tar.gz"]
       local_files_include_filter_prefix: "archive"
-      remote_file: tarballs/${revision}/
+      remote_file: tarballs/
       permissions: public-read
       content_type: "application/x-gzip"
       display_name: envoy-serverlss.tar.gz
