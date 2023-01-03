@@ -39,6 +39,7 @@ functions:
       binary: bash
       args:
       - "src/evergreen/archive-evergreen.sh"
+  # Upload archives to the S3 directory for this build.
   "s3 upload archive":
     command: s3.put
     params:
@@ -77,11 +78,12 @@ functions:
           export CONFIG_DIR=`pwd`
           export AWS_CONFIG_FILE=$CONFIG_DIR/conf.aws
           export AWS_CREDENTIAL_FILE=$CONFIG_DIR/cred.aws
+          export BUCKET=mongodb-mms-build-envoy-serverless
           # Copy binary archives from build directory to tarballs directory
-          aws s3 ls s3://mongodb-mms-build-envoy-serverless/build/${build_id}/  \
+          aws s3 ls s3://$BUCKET/build/${build_id}/  \
             | awk '{print $NF}'  \
             | grep "envoy-serverless-.*\.tar\.gz"  \
-            | xargs -I{} -n1 aws s3 cp s3://mongodb-mms-build-envoy-serverless/build/${build_id}/{} s3://mongodb-mms-build-envoy-serverless/tarballs/
+            | xargs -I{} -n1 aws s3 cp s3://$BUCKET/build/${build_id}/{} s3://$BUCKET/tarballs/
 
 buildvariants:
 - name: centos7

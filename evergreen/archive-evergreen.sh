@@ -12,8 +12,13 @@ cd $SRCDIR
 VERSION=$(git describe --tags --dirty --always --match 'v[0-9]*' | cut -c 2-)
 cd -
 
+# The archives has to be put in a directory because evergreen s3.put will scan the working directory
+# to find files specified by "local_files_include_filter". However, the build files created by
+# the docker containers cannot be accessed due to permissions, leading to a failure. Changing the
+# working directory to "ARCHIVE_PATH" is a workaround.
 ARCHIVE_PATH=archive
-ARCHIVE_DIR=$ARCHIVE_PATH/envoy-serverless-${VERSION}.centos7.amd64
+# Example archive file name: envoy-serverless-1.21.3-4-gdbdcfa34cf.rhel7.amd64.tar.gz
+ARCHIVE_DIR=$ARCHIVE_PATH/envoy-serverless-${VERSION}.rhel7.amd64
 mkdir -p ${ARCHIVE_DIR}
 # Only include the envoy binary and the hot-restarter. The start script and the static config should
 # be prepared by the agent.
