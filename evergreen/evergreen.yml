@@ -13,6 +13,11 @@ tasks:
       params:
         directory: src
     - func: "test envoy"
+- name: push
+  depends_on:
+    - name: compile
+  commands:
+    - func: "s3 push archive"
 
 functions:
   "compile envoy":
@@ -41,10 +46,16 @@ functions:
       bucket: mongodb-mms-build-envoy-serverless
       local_files_include_filter: ["*.tar.gz"]
       local_files_include_filter_prefix: "archive"
-      remote_file: tarballs/
+      remote_file: build/${build_id}/
       permissions: public-read
       content_type: "application/x-gzip"
-      display_name: envoy-serverlss.tar.gz
+  "s3 push archive":
+    command: s3Copy.copy
+    params:
+      aws_key: ${release_aws_key}
+      aws_secret: ${release_aws_secret}
+      s3_copy_files:
+      - {'optional': false, 'source': {'path': 'build/${build_id}/envoy-serverless*.tar.gz', 'bucket': 'mongodb-mms-build-envoy-serverless'}, 'destination': {'path': 'tarballs/', 'bucket': 'mongodb-mms-build-envoy-serverless'}}
 
 buildvariants:
 - name: centos7
@@ -55,4 +66,5 @@ buildvariants:
   tasks:
   - name: compile
   - name: test
+  - name: push
 
