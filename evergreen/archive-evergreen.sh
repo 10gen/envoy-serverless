@@ -4,12 +4,12 @@ set -xeuo pipefail
 SRCDIR=$(pwd)/src
 cd $SRCDIR
 # Generate version from the most recent base tag.
-# For example, v1.21.3-4-gdbdcfa34cf is based on the most recent tag "v1.21.3" and
+# For example, 1.21.3-4-gdbdcfa34cf is based on the most recent tag "v1.21.3" and
 # has "4" commits on top of that, then it appends the "g" prefix (for git) and
-# an abbreviated object name for the commit.
+# an abbreviated object name for the commit. The leading "v" is then omitted.
 # --dirty: If the working tree has local modification "-dirty" is appended to it.
 # --always: Show uniquely abbreviated commit object as fallback when no tag is found.
-VERSION=$(git describe --tags --dirty --always --match 'v[0-9]*')
+VERSION=$(git describe --tags --dirty --always --match 'v[0-9]*' | cut -c 2-)
 cd -
 
 ARCHIVE_PATH=archive
