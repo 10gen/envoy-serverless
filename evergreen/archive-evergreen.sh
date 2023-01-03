@@ -12,7 +12,7 @@ cd $SRCDIR
 VERSION=$(git describe --tags --dirty --always --match 'v[0-9]*' | cut -c 2-)
 cd -
 
-# The archives has to be put in a directory because evergreen s3.put will scan the working directory
+# The archives have to be put in a directory because evergreen s3.put will scan the working directory
 # to find files specified by "local_files_include_filter". However, the build files created by
 # the docker containers cannot be accessed due to permissions, leading to a failure. Changing the
 # working directory to "ARCHIVE_PATH" is a workaround.
