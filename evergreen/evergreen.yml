@@ -14,6 +14,7 @@ tasks:
         directory: src
     - func: "test envoy"
 - name: push
+  patchable: false
   depends_on:
     - name: compile
   commands:
