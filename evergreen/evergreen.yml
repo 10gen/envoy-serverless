@@ -5,12 +5,21 @@ tasks:
       params:
         directory: src
     - func: "compile envoy"
+    - func: "archive"
+    - func: "s3 upload archive"
 - name: test
   commands:
     - command: git.get_project
       params:
         directory: src
     - func: "test envoy"
+- name: push
+  patchable: false
+  depends_on:
+    - name: compile
+  commands:
+    - func: "create push credentials"
+    - func: "s3 push archive"
 
 functions:
   "compile envoy":
@@ -25,6 +34,57 @@ functions:
       binary: bash
       args:
       - "src/evergreen/test-centos7-evergreen.sh"
+  "archive":
+    command: subprocess.exec
+    params:
+      binary: bash
+      args:
+      - "src/evergreen/archive-evergreen-rhel7-amd64.sh"
+  # Upload archives to the S3 directory for this build.
+  "s3 upload archive":
+    command: s3.put
+    params:
+      aws_key: ${release_aws_key}
+      aws_secret: ${release_aws_secret}
+      bucket: mongodb-mms-build-envoy-serverless
+      local_files_include_filter: ["*.tar.gz"]
+      local_files_include_filter_prefix: "archive"
+      remote_file: build/${build_id}/
+      permissions: public-read
+      content_type: "application/x-gzip"
+  "create push credentials":
+    command: shell.exec
+    params:
+      working_dir: .
+      script: |
+        set -e
+        # Create a config file for AWS S3 CLI
+        echo "creating config file"
+        echo "[default]" > conf.aws
+        chmod 700 conf.aws
+        echo aws_access_key_id=${release_aws_key} >> conf.aws
+        echo aws_secret_access_key=${release_aws_secret} >> conf.aws
+        # Create a credentials file for AWS S3 CLI
+        echo "creating credentials file"
+        echo "[default]" > cred.aws
+        chmod 700 cred.aws
+        echo region=us-east-1 >> cred.aws
+  "s3 push archive":
+    - command: shell.exec
+      params:
+        working_dir: .
+        script: |
+          set -evx
+          # Export the config file location
+          export CONFIG_DIR=`pwd`
+          export AWS_CONFIG_FILE=$CONFIG_DIR/conf.aws
+          export AWS_CREDENTIAL_FILE=$CONFIG_DIR/cred.aws
+          export BUCKET=mongodb-mms-build-envoy-serverless
+          # Copy binary archives from build directory to tarballs directory
+          aws s3 ls s3://$BUCKET/build/${build_id}/  \
+            | awk '{print $NF}'  \
+            | grep "envoy-serverless-.*\.tar\.gz"  \
+            | xargs -I{} -n1 aws s3 cp s3://$BUCKET/build/${build_id}/{} s3://$BUCKET/tarballs/
 
 buildvariants:
 - name: centos7
@@ -32,11 +92,8 @@ buildvariants:
   run_on:
     # Tasks run in x86 CentOS7 containers, so the Linux distro doesn't have to match.
     - rhel80-xlarge
-  expansions:
-    release: 7
-    image: centos:7
-    arch: x86_64
   tasks:
   - name: compile
   - name: test
+  - name: push
 
