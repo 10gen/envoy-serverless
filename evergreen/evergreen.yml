@@ -84,7 +84,7 @@ functions:
           aws s3 ls s3://$BUCKET/build/${build_id}/  \
             | awk '{print $NF}'  \
             | grep "envoy-serverless-.*\.tar\.gz"  \
-            | xargs -I{} -n1 aws s3 cp s3://$BUCKET/build/${build_id}/{} s3://$BUCKET/tarballs/
+            | xargs -I{} -n1 aws s3 cp s3://$BUCKET/build/${build_id}/{} s3://$BUCKET/tarballs/ --acl public-read
 
 buildvariants:
 - name: centos7
