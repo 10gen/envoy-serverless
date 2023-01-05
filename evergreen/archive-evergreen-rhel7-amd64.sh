@@ -18,10 +18,12 @@ cd -
 # working directory to "ARCHIVE_PATH" is a workaround.
 ARCHIVE_PATH=archive
 # Example archive file name: envoy-serverless-1.21.3-4-gdbdcfa34cf.rhel7.amd64.tar.gz
-ARCHIVE_DIR=$ARCHIVE_PATH/envoy-serverless-${VERSION}.rhel7.amd64
-mkdir -p ${ARCHIVE_DIR}
+ARCHIVE_DIR=envoy-serverless-${VERSION}.rhel7.amd64
+mkdir -p ${ARCHIVE_PATH}/${ARCHIVE_DIR}
+
 # Only include the envoy binary and the hot-restarter. The start script and the static config should
 # be prepared by the agent.
-cp build/execroot/envoy/bazel-out/k8-opt/bin/source/exe/envoy-static ${ARCHIVE_DIR}/envoy-serverless
-cp ${SRCDIR}/restarter/hot-restarter.py ${ARCHIVE_DIR}
+cp build/execroot/envoy/bazel-out/k8-opt/bin/source/exe/envoy-static ${ARCHIVE_PATH}/${ARCHIVE_DIR}/envoy-serverless
+cp ${SRCDIR}/restarter/hot-restarter.py ${ARCHIVE_PATH}/${ARCHIVE_DIR}/
+cd ${ARCHIVE_PATH}
 tar -zcvf ${ARCHIVE_DIR}.tar.gz ${ARCHIVE_DIR}
