@@ -504,6 +504,9 @@ void InstanceImpl::initialize(Network::Address::InstanceConstSharedPtr local_add
   server_stats_->version_.set(version_int);
   if (VersionInfo::sslFipsCompliant()) {
     server_compilation_settings_stats_->fips_mode_.set(1);
+  } else {
+    // Set this explicitly so that "used" flag is set so that it can be pushed to stats sinks.
+    server_compilation_settings_stats_->fips_mode_.set(0);
   }
 
   // If user has set user_agent_name in the bootstrap config, use it.
@@ -683,10 +686,10 @@ void InstanceImpl::initialize(Network::Address::InstanceConstSharedPtr local_add
       dns_resolver_factory.createDnsResolver(dispatcher(), api(), typed_dns_resolver_config);
 
   cluster_manager_factory_ = std::make_unique<Upstream::ProdClusterManagerFactory>(
-      *admin_, runtime(), stats_store_, thread_local_, dns_resolver_, *ssl_context_manager_,
-      *dispatcher_, *local_info_, *secret_manager_, messageValidationContext(), *api_,
-      http_context_, grpc_context_, router_context_, access_log_manager_, *singleton_manager_,
-      options_, quic_stat_names_, *this);
+      serverFactoryContext(), *admin_, runtime(), stats_store_, thread_local_, dns_resolver_,
+      *ssl_context_manager_, *dispatcher_, *local_info_, *secret_manager_,
+      messageValidationContext(), *api_, http_context_, grpc_context_, router_context_,
+      access_log_manager_, *singleton_manager_, options_, quic_stat_names_, *this);
 
   // Now the configuration gets parsed. The configuration may start setting
   // thread local data per above. See MainImpl::initialize() for why ConfigImpl
@@ -761,14 +764,11 @@ void InstanceImpl::onRuntimeReady() {
     TRY_ASSERT_MAIN_THREAD {
       Config::Utility::checkTransportVersion(hds_config);
       hds_delegate_ = std::make_unique<Upstream::HdsDelegate>(
-          stats_store_,
+          serverFactoryContext(), stats_store_,
           Config::Utility::factoryForGrpcApiConfigSource(*async_client_manager_, hds_config,
                                                          stats_store_, false)
               ->createUncachedRawAsyncClient(),
-          *dispatcher_, runtime(), stats_store_, *ssl_context_manager_, info_factory_,
-          access_log_manager_, *config_.clusterManager(), *local_info_, *admin_,
-          *singleton_manager_, thread_local_, messageValidationContext().dynamicValidationVisitor(),
-          *api_, options_);
+          stats_store_, *ssl_context_manager_, info_factory_);
     }
     END_TRY
     catch (const EnvoyException& e) {
