@@ -534,6 +534,7 @@ envoy_cc_library(
         "//envoy/network:proxy_protocol_options_lib",
         "//envoy/stream_info:filter_state_interface",
         "//source/common/common:macros",
+        "//source/common/common:hex_lib",
     ],
 )
 

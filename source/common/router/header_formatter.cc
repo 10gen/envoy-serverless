@@ -13,6 +13,10 @@
 #include "source/common/http/header_map_impl.h"
 #include "source/common/json/json_loader.h"
 #include "source/common/stream_info/utility.h"
+#include "source/common/network/proxy_protocol_filter_state.h"
+#include "envoy/network/proxy_protocol.h"
+#include "source/common/common/hex.h"
+#include "source/common/common/base64.h"
 
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
@@ -191,6 +195,40 @@ parsePerRequestStateField(absl::string_view param_str) {
     }
 
     return std::string(typed_state->asString());
+  };
+}
+
+// Parses the proxy protocol TLVs stored in the FilterState with the key "envoy.network.proxy_protocol_options" 
+// and returns a function suitable for accessing the specified metadata from an StreamInfo::StreamInfo. 
+std::function<std::string(const Envoy::StreamInfo::StreamInfo&)>
+parseProxyProtocolTlvsFromFilterState() {
+
+  return [](const Envoy::StreamInfo::StreamInfo& stream_info) -> std::string {
+    const Envoy::StreamInfo::FilterState& filter_state = stream_info.filterState();
+    auto typed_state = filter_state.getDataReadOnly<Network::ProxyProtocolFilterState>(Network::ProxyProtocolFilterState::key());
+
+    // Value exists but isn't string accessible is a contract violation; throw an error.
+    if (typed_state == nullptr) {
+      ENVOY_LOG_MISC(debug, "Invalid header: PARSE_PROXY_PROTOCOL_TLVS.");
+      return std::string();
+    }
+
+  // Format the vector of proxy protocol TLVs as follows: <type integer>|<base64 encoded value>[,...]
+    std::ostringstream oss;
+    if (!typed_state->value().tlv_vector_.empty()) {
+      ENVOY_LOG_MISC(debug, "parsing proxy protocol TLVs: length of TLV vector is {}", typed_state->value().tlv_vector_.size());
+
+      // Add the first element with no delimiter
+      auto first_tlv = typed_state->value().tlv_vector_.cbegin();
+
+      // Base64 encode the TLV value
+      auto base64_encoded_tlv_value = Base64::encode(first_tlv->value.data(), first_tlv->value.length());
+      oss << fmt::format("{}|{}", first_tlv->type, base64_encoded_tlv_value);
+      while (typed_state->value().tlv_vector_.cend() != ++first_tlv) {
+        oss << fmt::format(", {}|{}", first_tlv->type, Base64::encode(first_tlv->value.data(), first_tlv->value.length()));
+      }
+    }
+    return oss.str();
   };
 }
 
@@ -412,6 +450,10 @@ StreamInfoHeaderFormatter::StreamInfoHeaderFormatter(absl::string_view field_nam
   } else if (absl::StartsWith(field_name, "PER_REQUEST_STATE")) {
     field_extractor_ =
         parsePerRequestStateField(field_name.substr(STATIC_STRLEN("PER_REQUEST_STATE")));
+  // TODO Betsy: add special handling here for new header formatter if adding additional field to the config
+  } else if (absl::StartsWith(field_name, "PARSE_PROXY_PROTOCOL_TLVS")) {
+    field_extractor_ =
+        parseProxyProtocolTlvsFromFilterState();
   } else if (absl::StartsWith(field_name, "REQ")) {
     field_extractor_ = parseRequestHeader(field_name.substr(STATIC_STRLEN("REQ")));
   } else if (field_name == "HOSTNAME") {

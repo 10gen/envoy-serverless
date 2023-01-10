@@ -302,6 +302,7 @@ envoy_cc_library(
         "//source/common/common:enum_to_int",
         "//source/common/common:hash_lib",
         "//source/common/common:hex_lib",
+        "//source/common/common:base64_lib",
         "//source/common/common:linked_object",
         "//source/common/common:minimal_logger_lib",
         "//source/common/common:scope_tracker",
@@ -391,6 +392,9 @@ envoy_cc_library(
         "//source/common/formatter:substitution_formatter_lib",
         "//source/common/http:header_map_lib",
         "//source/common/json:json_loader_lib",
+        "//source/common/network:proxy_protocol_filter_state_lib",
+        "//source/common/common:hex_lib",
+        "//source/common/common:base64_lib",
     ],
 )
 

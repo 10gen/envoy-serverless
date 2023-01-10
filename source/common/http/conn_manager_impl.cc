@@ -129,6 +129,19 @@ void ConnectionManagerImpl::initializeReadFilterCallbacks(Network::ReadFilterCal
            .streamInfo()
            .filterState()
            ->hasData<Network::ProxyProtocolFilterState>(Network::ProxyProtocolFilterState::key())) {
+            
+            
+    // TODO betsy: this is probably where to edit to read the filter state tlv_vector data 
+
+  //     if (const auto* per_connection_cluster =
+  //         connection.streamInfo().filterState()->getDataReadOnly<PerConnectionCluster>(
+  //             PerConnectionCluster::key());
+  //     per_connection_cluster != nullptr) {
+  //   return std::make_shared<const SimpleRouteImpl>(*this, per_connection_cluster->value());
+  // }
+
+    ENVOY_CONN_LOG(debug, "betsy - setting filter state data connection info", read_callbacks_->connection());
+
     read_callbacks_->connection().streamInfo().filterState()->setData(
         Network::ProxyProtocolFilterState::key(),
         std::make_unique<Network::ProxyProtocolFilterState>(Network::ProxyProtocolData{

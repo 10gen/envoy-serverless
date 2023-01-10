@@ -1047,6 +1047,8 @@ std::string Utility::PercentEncoding::decode(absl::string_view encoded) {
   return decoded;
 }
 
+// TODO betsy: maybe add a helper method here to parse the TLVs to pass back into the filterstate in the hcm
+
 Utility::AuthorityAttributes Utility::parseAuthority(absl::string_view host) {
   // First try to see if there is a port included. This also checks to see that there is not a ']'
   // as the last character which is indicative of an IPv6 address without a port. This is a best

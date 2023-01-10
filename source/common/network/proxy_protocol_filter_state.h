@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include "envoy/network/proxy_protocol.h"
 #include "envoy/stream_info/filter_state.h"
 
@@ -17,6 +19,10 @@ public:
 
 private:
   const Network::ProxyProtocolData options_;
+
+  // std::string getTlvVectorAsString();
+// TODO Betsy: need to add a method here to parse the TLV vector into strings that can be printed as headers
+//  Add the header for the function here and then implement it in the cc file 
 };
 
 } // namespace Network

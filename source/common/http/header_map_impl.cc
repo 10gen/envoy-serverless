@@ -130,6 +130,9 @@ void HeaderString::clear() {
 }
 
 void HeaderString::setCopy(const char* data, uint32_t size) {
+  ENVOY_LOG_MISC(debug, "header data getting validated: {}", data);
+  ENVOY_LOG_MISC(debug, "header size getting validated: {}", size);
+  // ENVOY_LOG_MISC(debug, "header string getting validated: {}", Envoy::Hex::encode(data, size));
   ASSERT(validHeaderString(absl::string_view(data, size)));
 
   if (!absl::holds_alternative<InlineHeaderVector>(buffer_)) {

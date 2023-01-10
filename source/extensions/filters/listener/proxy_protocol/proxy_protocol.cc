@@ -142,6 +142,9 @@ ReadOrParseState Filter::parseBuffer(Network::ListenerFilterBuffer& buffer) {
                           buf + proxy_protocol_header_.value().headerLengthWithoutExtension(),
                           proxy_protocol_header_.value().extensions_length_)));
     }
+    ENVOY_LOG(debug, fmt::format("parsed_tlvs_: {}", parsed_tlvs_.size()));
+    // ENVOY_LOG(debug, fmt::format("parsed_tlvs_ first item: {}", parsed_tlvs_.front()));
+
     cb_->filterState().setData(
         Network::ProxyProtocolFilterState::key(),
         std::make_unique<Network::ProxyProtocolFilterState>(Network::ProxyProtocolData{
@@ -393,8 +396,13 @@ bool Filter::parseTlvs(const uint8_t* buf, size_t len) {
     // Only save to dynamic metadata if this type of TLV is needed.
     absl::string_view tlv_value(reinterpret_cast<char const*>(buf + idx), tlv_value_length);
     auto key_value_pair = config_->isTlvTypeNeeded(tlv_type);
+    ENVOY_LOG(debug, "proxy_protocol: about to see if we need to store the tlv value {}", std::string(tlv_value));
     if (nullptr != key_value_pair) {
       ProtobufWkt::Value metadata_value;
+      ENVOY_LOG(debug, "proxy_protocol: tlv value getting stored in metadata: {}", std::string(tlv_value));
+      // TODO betsy: edit below 
+      ENVOY_LOG(debug, "proxy_protocol try 1: tlv value getting stored in metadata; data: {}, size: {}", tlv_value.data(), tlv_value.size());
+      ENVOY_LOG(debug, "proxy_protocol try 2: tlv value getting stored in metadata; data: {}, size: {}", std::string(tlv_value.data()), tlv_value.size());
       metadata_value.set_string_value(tlv_value.data(), tlv_value.size());
 
       std::string metadata_key = key_value_pair->metadata_namespace().empty()
@@ -410,9 +418,13 @@ bool Filter::parseTlvs(const uint8_t* buf, size_t len) {
     }
 
     // Save TLV to the filter state.
+    ENVOY_LOG(debug, "checking if pass through needed...");
     if (config_->isPassThroughTlvTypeNeeded(tlv_type)) {
-      ENVOY_LOG(trace, "proxy_protocol: Storing parsed TLV of type {}", tlv_type);
-      parsed_tlvs_.push_back({tlv_type, std::string(tlv_value)});
+      ENVOY_LOG(debug, "proxy_protocol: Storing parsed TLV of type {}", tlv_type);
+      ENVOY_LOG(debug, "proxy_protocol: Storing parsed TLV value {}", std::string(tlv_value.data()));
+      // TODO betsy: is the string empty because we're storing it without separate the data and size fields?
+      std::string tlvData = std::string(tlv_value.data());
+      parsed_tlvs_.push_back({tlv_type, tlvData});
     }
 
     idx += tlv_value_length;
