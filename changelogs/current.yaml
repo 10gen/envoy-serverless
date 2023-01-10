@@ -50,5 +50,11 @@ new_features:
 - area: http
   change: |
     allowing the dynamic forward proxy cluster to :ref:`allow_coalesced_connections <envoy_v3_api_field_extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig.allow_coalesced_connections>`  for HTTP/2 and HTTP/3 connections.
+date: August 23, 2022
+
+bug_fixes:
+- area: listener
+  change: |
+    fixed a bug that doesn't handle of an update for a listener with IPv4-mapped address correctly and that will lead to a memory leak.
 
 deprecated:
