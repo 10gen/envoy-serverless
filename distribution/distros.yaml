@@ -6,7 +6,3 @@ debian_bullseye:
 ubuntu_focal:
   image: ubuntu:20.04
   ext: focal.changes
-
-ubuntu_jammy:
-  image: ubuntu:22.04
-  ext: jammy.changes
