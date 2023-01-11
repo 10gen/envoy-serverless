@@ -27,6 +27,8 @@
 #include "source/common/protobuf/utility.h"
 #include "source/common/runtime/runtime_features.h"
 #include "source/common/stream_info/utility.h"
+#include "source/common/common/base64.h"
+#include "source/common/network/proxy_protocol_filter_state.h"
 
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_split.h"
@@ -457,6 +459,12 @@ SubstitutionFormatParser::getKnownFormatters() {
         {CommandSyntaxChecker::PARAMS_OPTIONAL | CommandSyntaxChecker::LENGTH_ALLOWED,
          [](const std::string& format, const absl::optional<size_t>& max_length) {
            return FilterStateFormatter::create(format, max_length, false);
+         }}},
+         // TODO betsy: is anything else needed here? 
+       {"PROXY_PROTOCOL_TLVS",
+        {CommandSyntaxChecker::COMMAND_ONLY,
+         [](const std::string&, const absl::optional<size_t>&) {
+           return std::make_unique<ProxyProtocolTlvsFormatter>();
          }}},
        {"UPSTREAM_FILTER_STATE",
         {CommandSyntaxChecker::PARAMS_OPTIONAL | CommandSyntaxChecker::LENGTH_ALLOWED,
@@ -1917,6 +1925,48 @@ UpstreamHostMetadataFormatter::UpstreamHostMetadataFormatter(const std::string& 
                           }
                           return host->metadata().get();
                         }) {}
+
+// Parses the proxy protocol TLVs stored in the FilterState with the key "envoy.network.proxy_protocol_options" 
+// and returns a function suitable for accessing the specified metadata from an StreamInfo::StreamInfo. 
+absl::optional<std::string> ProxyProtocolTlvsFormatter::format(const Http::RequestHeaderMap&,
+                                                        const Http::ResponseHeaderMap&,
+                                                        const Http::ResponseTrailerMap&,
+                                                        const StreamInfo::StreamInfo& stream_info,
+                                                        absl::string_view) const {
+  const Envoy::StreamInfo::FilterState& filter_state = stream_info.filterState();
+  auto typed_state = filter_state.getDataReadOnly<Network::ProxyProtocolFilterState>(Network::ProxyProtocolFilterState::key());
+
+    // Value exists but isn't string accessible is a contract violation; throw an error.
+    if (typed_state == nullptr) {
+      ENVOY_LOG_MISC(debug, "Invalid header: PROXY_PROTOCOL_TLVS.");
+      return std::string();
+    }
+
+  // Format the vector of proxy protocol TLVs as follows: <type integer>|<base64 encoded value>[,...]
+    std::ostringstream oss;
+  if (!typed_state->value().tlv_vector_.empty()) {
+      ENVOY_LOG_MISC(debug, "parsing proxy protocol TLVs: length of the TLV vector is {}", typed_state->value().tlv_vector_.size());
+
+      // Add the first element with no delimiter
+      auto first_tlv = typed_state->value().tlv_vector_.cbegin();
+
+      // Base64 encode the TLV value
+      auto base64_encoded_tlv_value = Base64::encode(first_tlv->value.data(), first_tlv->value.length());
+      oss << fmt::format("{}|{}", first_tlv->type, base64_encoded_tlv_value);
+      while (typed_state->value().tlv_vector_.cend() != ++first_tlv) {
+        oss << fmt::format(", {}|{}", first_tlv->type, Base64::encode(first_tlv->value.data(), first_tlv->value.length()));
+      }
+  }
+  return oss.str();
+}
+
+ProtobufWkt::Value ProxyProtocolTlvsFormatter::formatValue(
+    const Http::RequestHeaderMap& request_headers, const Http::ResponseHeaderMap& response_headers,
+    const Http::ResponseTrailerMap& response_trailers, const StreamInfo::StreamInfo& stream_info,
+    absl::string_view local_reply_body) const {
+  return ValueUtil::optionalStringValue(
+      format(request_headers, response_headers, response_trailers, stream_info, local_reply_body));
+}
 
 std::unique_ptr<FilterStateFormatter>
 FilterStateFormatter::create(const std::string& format, const absl::optional<size_t>& max_length,

@@ -575,6 +575,30 @@ private:
 };
 
 /**
+ * FormatterProvider for ProxyProtocolTlvs stored in FilterState from StreamInfo.
+ */
+class ProxyProtocolTlvsFormatter : public FormatterProvider {
+public:
+  // FormatterProvider
+  absl::optional<std::string> format(const Http::RequestHeaderMap&, const Http::ResponseHeaderMap&,
+                                     const Http::ResponseTrailerMap&, const StreamInfo::StreamInfo&,
+                                     absl::string_view) const override;
+  ProtobufWkt::Value formatValue(const Http::RequestHeaderMap&, const Http::ResponseHeaderMap&,
+                                 const Http::ResponseTrailerMap&, const StreamInfo::StreamInfo&,
+                                 absl::string_view) const override;
+
+// private:
+//   const Envoy::StreamInfo::FilterState::Object*
+
+//   std::string key_;
+//   absl::optional<size_t> max_length_;
+
+  // TODO Betsy: do I need these? probs no
+  // bool serialize_as_string_;
+  // const bool is_upstream_;
+};
+
+/**
  * Base FormatterProvider for system times from StreamInfo.
  */
 class SystemTimeFormatter : public FormatterProvider {

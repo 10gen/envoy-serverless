@@ -29,6 +29,8 @@ envoy_cc_library(
         "//source/common/runtime:runtime_features_lib",
         "//source/common/stream_info:utility_lib",
         "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
+        "//source/common/common:base64_lib",
+        "//source/common/network:proxy_protocol_filter_state_lib",
     ],
 )
 
