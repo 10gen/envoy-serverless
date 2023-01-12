@@ -6,7 +6,7 @@
 set -euo pipefail
 set -x
 
-source $(dirname "$0")/set-up-env-centos7.sh
+source $(dirname "$0")/set-up-env.sh
 
 # Test targets listed in repo's .bazelci config
 export bazel_tests="//test/common/common/... //test/integration/... //test/exe/..."

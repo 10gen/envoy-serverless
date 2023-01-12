@@ -9,4 +9,4 @@ sudo podman --root="$(pwd)/containers" run \
     -v "$SRCDIR:$REPODIR" \
     -v "$(pwd)/build:/build" \
     docker.io/siyuanzhou/envoy-serverless-centos7 \
-    $REPODIR/evergreen/compile-centos7.sh
+    $REPODIR/evergreen/compile.sh

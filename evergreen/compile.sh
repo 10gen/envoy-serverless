@@ -5,7 +5,7 @@
 
 set -xeuo pipefail
 
-source $(dirname "$0")/set-up-env-centos7.sh
+source $(dirname "$0")/set-up-env.sh
 
 # If this script can be executed, then /etc/envoy-serverless must be accessable.
 cd /etc/envoy-serverless

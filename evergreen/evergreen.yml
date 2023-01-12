@@ -27,19 +27,19 @@ functions:
     params:
       binary: bash
       args:
-      - "src/evergreen/compile-centos7-evergreen.sh"
+      - "src/evergreen/compile-evergreen.sh"
   "test envoy":
     command: subprocess.exec
     params:
       binary: bash
       args:
-      - "src/evergreen/test-centos7-evergreen.sh"
+      - "src/evergreen/test-evergreen.sh"
   "archive":
     command: subprocess.exec
     params:
       binary: bash
       args:
-      - "src/evergreen/archive-evergreen-rhel7-amd64.sh"
+      - "src/evergreen/archive-evergreen.sh"
       env:
         DISTRO: ${distro}
         ARCH: ${arch}
