@@ -40,6 +40,9 @@ functions:
       binary: bash
       args:
       - "src/evergreen/archive-evergreen-rhel7-amd64.sh"
+      env:
+        DISTRO: ${distro}
+        ARCH: ${arch}
   # Upload archives to the S3 directory for this build.
   "s3 upload archive":
     command: s3.put
@@ -88,10 +91,26 @@ functions:
 
 buildvariants:
 - name: centos7
-  display_name: CentOS 7
+  display_name: CentOS 7 x86_64
   run_on:
     # Tasks run in x86 CentOS7 containers, so the Linux distro doesn't have to match.
     - rhel80-xlarge
+  expansions:
+    distro: rhel7
+    arch: x86_64
+  tasks:
+  - name: compile
+  - name: test
+  - name: push
+
+- name: al2-aarch64
+  display_name: Amazon Linux 2 aarch64
+  run_on:
+    # Tasks run in Amazon Linux 2 containers, so the Linux distro doesn't have to match.
+    - rhel82-arm64-large
+  expansions:
+    distro: al2
+    arch: aarch64
   tasks:
   - name: compile
   - name: test

@@ -1,4 +1,7 @@
 #!/bin/bash
+
+# Assume $DISTRO and $ARCH are set.
+
 set -xeuo pipefail
 
 SRCDIR=$(pwd)/src
@@ -18,7 +21,7 @@ cd -
 # working directory to "ARCHIVE_PATH" is a workaround.
 ARCHIVE_PATH=archive
 # Example archive file name: envoy-serverless-1.21.3-4-gdbdcfa34cf.rhel7.amd64.tar.gz
-ARCHIVE_DIR=envoy-serverless-${VERSION}.rhel7.amd64
+ARCHIVE_DIR=envoy-serverless-${VERSION}.${DISTRO}.${ARCH}
 mkdir -p ${ARCHIVE_PATH}/${ARCHIVE_DIR}
 
 # Only include the envoy binary and the hot-restarter. The start script and the static config should
