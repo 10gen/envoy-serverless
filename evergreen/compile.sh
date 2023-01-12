@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# This script runs in a container built from Dockerfile-centos7.
+# This script runs in a container built from the Dockerfiles.
 # It assumes the workspace directory is mounted on /etc/envoy-serverless and the build directory is optionally mounted on /build
 
 set -xeuo pipefail

@@ -28,12 +28,16 @@ functions:
       binary: bash
       args:
       - "src/evergreen/compile-evergreen.sh"
+      env:
+        DOCKER_IMAGE: ${docker_image}
   "test envoy":
     command: subprocess.exec
     params:
       binary: bash
       args:
       - "src/evergreen/test-evergreen.sh"
+      env:
+        DOCKER_IMAGE: ${docker_image}
   "archive":
     command: subprocess.exec
     params:
@@ -96,6 +100,7 @@ buildvariants:
     # Tasks run in x86 CentOS7 containers, so the Linux distro doesn't have to match.
     - rhel80-xlarge
   expansions:
+    docker_image: docker.io/siyuanzhou/envoy-serverless-centos7
     distro: rhel7
     arch: x86_64
   tasks:
@@ -109,6 +114,7 @@ buildvariants:
     # Tasks run in Amazon Linux 2 containers, so the Linux distro doesn't have to match.
     - rhel82-arm64-large
   expansions:
+    docker_image: docker.io/siyuanzhou/envoy-serverless-al2-aarch64
     distro: al2
     arch: aarch64
   tasks:
