@@ -24,9 +24,14 @@ ARCHIVE_PATH=archive
 ARCHIVE_DIR=envoy-serverless-${VERSION}.${DISTRO}.${ARCH}
 mkdir -p ${ARCHIVE_PATH}/${ARCHIVE_DIR}
 
+if [ $ARCH == "aarch64" ]; then
+	OUTPUT_DIR="aarch64"
+else
+	OUTPUT_DIR="k8"
+fi
 # Only include the envoy binary and the hot-restarter. The start script and the static config should
 # be prepared by the agent.
-cp build/execroot/envoy/bazel-out/k8-opt/bin/source/exe/envoy-static ${ARCHIVE_PATH}/${ARCHIVE_DIR}/envoy-serverless
+cp build/execroot/envoy/bazel-out/$OUTPUT_DIR-opt/bin/source/exe/envoy-static ${ARCHIVE_PATH}/${ARCHIVE_DIR}/envoy-serverless
 cp ${SRCDIR}/restarter/hot-restarter.py ${ARCHIVE_PATH}/${ARCHIVE_DIR}/
 cd ${ARCHIVE_PATH}
 tar -zcvf ${ARCHIVE_DIR}.tar.gz ${ARCHIVE_DIR}
