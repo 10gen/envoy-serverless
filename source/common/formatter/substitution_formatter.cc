@@ -460,11 +460,11 @@ SubstitutionFormatParser::getKnownFormatters() {
          [](const std::string& format, const absl::optional<size_t>& max_length) {
            return FilterStateFormatter::create(format, max_length, false);
          }}},
-         // TODO betsy: is anything else needed here? 
+         // TODO betsy: is anything else needed here? do we want the param to be optional?
        {"PROXY_PROTOCOL_TLVS",
-        {CommandSyntaxChecker::COMMAND_ONLY,
-         [](const std::string&, const absl::optional<size_t>&) {
-           return std::make_unique<ProxyProtocolTlvsFormatter>();
+        {CommandSyntaxChecker::PARAMS_REQUIRED,
+         [](const std::string& tlv_type_filter, const absl::optional<size_t>&) {
+           return std::make_unique<ProxyProtocolTlvsFormatter>(tlv_type_filter);
          }}},
        {"UPSTREAM_FILTER_STATE",
         {CommandSyntaxChecker::PARAMS_OPTIONAL | CommandSyntaxChecker::LENGTH_ALLOWED,
@@ -1926,8 +1926,12 @@ UpstreamHostMetadataFormatter::UpstreamHostMetadataFormatter(const std::string& 
                           return host->metadata().get();
                         }) {}
 
+ProxyProtocolTlvsFormatter::ProxyProtocolTlvsFormatter(const std::string& tlv_type) {
+  tlv_type_ = std::stoi(tlv_type);
+}
+
 // Parses the proxy protocol TLVs stored in the FilterState with the key "envoy.network.proxy_protocol_options" 
-// and returns a function suitable for accessing the specified metadata from an StreamInfo::StreamInfo. 
+// and returns a function suitable for accessing the specified metadata from a StreamInfo::StreamInfo. 
 absl::optional<std::string> ProxyProtocolTlvsFormatter::format(const Http::RequestHeaderMap&,
                                                         const Http::ResponseHeaderMap&,
                                                         const Http::ResponseTrailerMap&,
@@ -1936,25 +1940,27 @@ absl::optional<std::string> ProxyProtocolTlvsFormatter::format(const Http::Reque
   const Envoy::StreamInfo::FilterState& filter_state = stream_info.filterState();
   auto typed_state = filter_state.getDataReadOnly<Network::ProxyProtocolFilterState>(Network::ProxyProtocolFilterState::key());
 
-    // Value exists but isn't string accessible is a contract violation; throw an error.
-    if (typed_state == nullptr) {
-      ENVOY_LOG_MISC(debug, "Invalid header: PROXY_PROTOCOL_TLVS.");
-      return std::string();
-    }
+  // Value exists but isn't string accessible is a contract violation; throw an error.
+  if (typed_state == nullptr) {
+    ENVOY_LOG_MISC(debug, "Invalid header: PROXY_PROTOCOL_TLVS.");
+    return std::string();
+  }
 
-  // Format the vector of proxy protocol TLVs as follows: <type integer>|<base64 encoded value>[,...]
-    std::ostringstream oss;
-  if (!typed_state->value().tlv_vector_.empty()) {
-      ENVOY_LOG_MISC(debug, "parsing proxy protocol TLVs: length of the TLV vector is {}", typed_state->value().tlv_vector_.size());
-
-      // Add the first element with no delimiter
-      auto first_tlv = typed_state->value().tlv_vector_.cbegin();
-
+  std::ostringstream oss;
+  std::vector<Network::ProxyProtocolTLV> tlv_vector = typed_state->value().tlv_vector_;
+  if (!tlv_vector.empty()) {
+      std::vector<Network::ProxyProtocolTLV> filtered_tlvs_;
+      std::copy_if(begin(tlv_vector), end(tlv_vector), std::back_inserter(filtered_tlvs_), [this](Network::ProxyProtocolTLV tlv) { return tlv.type == tlv_type_; });
+      ENVOY_LOG_MISC(debug, "parsing proxy protocol TLVs: full length of the TLV vector is {}, and {} value(s) exist(s) with type {}", tlv_vector.size(), filtered_tlvs_.size(), tlv_type_);
+      if (!filtered_tlvs_.empty()) {
+        // Return empty string if no suitable TLVs are stored of type tlv_type_
+        return "";
+      }
+      auto first_tlv = filtered_tlvs_.cbegin();
       // Base64 encode the TLV value
-      auto base64_encoded_tlv_value = Base64::encode(first_tlv->value.data(), first_tlv->value.length());
-      oss << fmt::format("{}|{}", first_tlv->type, base64_encoded_tlv_value);
-      while (typed_state->value().tlv_vector_.cend() != ++first_tlv) {
-        oss << fmt::format(", {}|{}", first_tlv->type, Base64::encode(first_tlv->value.data(), first_tlv->value.length()));
+      oss << Base64::encode(first_tlv->value.data(), first_tlv->value.length());
+      while (filtered_tlvs_.cend() != ++first_tlv) {
+        oss << fmt::format(", {}", Base64::encode(first_tlv->value.data(), first_tlv->value.length()));
       }
   }
   return oss.str();
