@@ -1930,7 +1930,7 @@ ProxyProtocolTlvsFormatter::ProxyProtocolTlvsFormatter(const std::string& tlv_ty
   // Specified tlv_type must be parsable as an int.
   try {
     tlv_type_ = std::stoi(tlv_type);
-  } catch (...) {
+  } catch (const EnvoyException& ex) {
     ENVOY_LOG_MISC(error, "Invalid parameter provided for PROXY_PROTOCOL_TLVS header: {}", tlv_type);
     // Arbitrary int that won't be used for proxy procotol TLV type. 
     tlv_type_ = -1; 
