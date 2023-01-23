@@ -13,6 +13,7 @@
 #include "source/common/http/header_map_impl.h"
 #include "source/common/json/json_loader.h"
 #include "source/common/network/address_impl.h"
+#include "source/common/network/proxy_protocol_filter_state.h"
 #include "source/common/protobuf/utility.h"
 #include "source/common/router/string_accessor_impl.h"
 
@@ -27,7 +28,6 @@
 #include "test/test_common/test_runtime.h"
 #include "test/test_common/threadsafe_singleton_injector.h"
 #include "test/test_common/utility.h"
-#include "source/common/network/proxy_protocol_filter_state.h"
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -2112,13 +2112,8 @@ TEST(SubstitutionFormatterTest, ProxyProtocolTlvsFormatter) {
   }
   // Invalid tlv_type passed as parameter
   {
-    NiceMock<StreamInfo::MockStreamInfo> stream_info;
-    auto providers = SubstitutionFormatParser::parse("%PROXY_PROTOCOL_TLVS(INVALID_TLV_TYPE)%");
-
-    ASSERT_EQ(providers.size(), 1);
-
-    EXPECT_EQ("", providers[0]->format(request_headers, response_headers, response_trailers,
-                                        stream_info, body));
+    EXPECT_THROW_WITH_MESSAGE(SubstitutionFormatParser::parse("%PROXY_PROTOCOL_TLVS(INVALID_TLV_TYPE)%"), EnvoyException,
+                              "Invalid parameter provided for PROXY_PROTOCOL_TLVS header: INVALID_TLV_TYPE");
   }
 
   // No TLVs stored in FilterState with specified tlv_type

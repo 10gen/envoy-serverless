@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <memory>
 #include <regex>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,7 @@
 
 #include "source/common/api/os_sys_calls_impl.h"
 #include "source/common/common/assert.h"
+#include "source/common/common/base64.h"
 #include "source/common/common/empty_string.h"
 #include "source/common/common/fmt.h"
 #include "source/common/common/thread.h"
@@ -23,12 +25,11 @@
 #include "source/common/grpc/common.h"
 #include "source/common/grpc/status.h"
 #include "source/common/http/utility.h"
+#include "source/common/network/proxy_protocol_filter_state.h"
 #include "source/common/protobuf/message_validator_impl.h"
 #include "source/common/protobuf/utility.h"
 #include "source/common/runtime/runtime_features.h"
 #include "source/common/stream_info/utility.h"
-#include "source/common/common/base64.h"
-#include "source/common/network/proxy_protocol_filter_state.h"
 
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_split.h"
@@ -1925,15 +1926,12 @@ UpstreamHostMetadataFormatter::UpstreamHostMetadataFormatter(const std::string& 
                           return host->metadata().get();
                         }) {}
 
-ProxyProtocolTlvsFormatter::ProxyProtocolTlvsFormatter(const std::string& tlv_type) {
-  ASSERT(!tlv_type.empty());
+ProxyProtocolTlvsFormatter::ProxyProtocolTlvsFormatter(const std::string& tlv_type_str) {
   // Specified tlv_type must be parsable as an int.
   try {
-    tlv_type_ = std::stoi(tlv_type);
-  } catch (const EnvoyException& ex) {
-    ENVOY_LOG_MISC(error, "Invalid parameter provided for PROXY_PROTOCOL_TLVS header: {}", tlv_type);
-    // Arbitrary int that won't be used for proxy procotol TLV type. 
-    tlv_type_ = -1; 
+    tlv_type_ = std::stoi(tlv_type_str);
+  } catch (const std::invalid_argument& ex) {
+    throw EnvoyException(fmt::format("Invalid parameter provided for PROXY_PROTOCOL_TLVS header: {}", tlv_type_str));
   }
 }
 
@@ -1944,39 +1942,24 @@ absl::optional<std::string> ProxyProtocolTlvsFormatter::format(const Http::Reque
                                                         const Http::ResponseTrailerMap&,
                                                         const StreamInfo::StreamInfo& stream_info,
                                                         absl::string_view) const {
-  const Envoy::StreamInfo::FilterState& filter_state = stream_info.filterState();
-  auto typed_state = filter_state.getDataReadOnly<Network::ProxyProtocolFilterState>(Network::ProxyProtocolFilterState::key());
+  const auto& typed_state = stream_info.filterState().getDataReadOnly<Network::ProxyProtocolFilterState>(Network::ProxyProtocolFilterState::key());
 
-  // Value exists but isn't string accessible is a contract violation; throw an error.
+  // ProxyProtocolFilterState is not stored in the filter state. 
   if (typed_state == nullptr) {
-    ENVOY_LOG_MISC(debug, "Invalid header: PROXY_PROTOCOL_TLVS.");
-    return std::string();
-  }
-
-  // tlv_type_ was not able to be parsed as an int.
-  if (tlv_type_ == -1) {
-    ENVOY_LOG_MISC(debug, "No suitable tlv_type found for PROXY_PROTOCOL_TLVS header.");
+    ENVOY_LOG_MISC(debug, "Invalid header: PROXY_PROTOCOL_TLVS. The ProxyProtocolFilterState is not stored in the filter state.");
     return std::string();
   }
 
   std::ostringstream oss;
-  std::vector<Network::ProxyProtocolTLV> tlv_vector = typed_state->value().tlv_vector_;
-  if (!tlv_vector.empty()) {
-      std::vector<Network::ProxyProtocolTLV> filtered_tlvs_;
-      std::copy_if(begin(tlv_vector), end(tlv_vector), std::back_inserter(filtered_tlvs_), [this](Network::ProxyProtocolTLV tlv) { return tlv.type == tlv_type_; });
-      ENVOY_LOG_MISC(debug, "Parsing proxy protocol TLVs: full length of the TLV vector is {}, and {} value(s) exist(s) with type {}", tlv_vector.size(), filtered_tlvs_.size(), tlv_type_);
-      if (filtered_tlvs_.empty()) {
-        ENVOY_LOG_MISC(debug, "No TLVs found with tlv_type {}", tlv_type_);
-        // Return empty string if no suitable TLVs are stored of type tlv_type_
-        return std::string();
-      }
-      auto first_tlv = filtered_tlvs_.cbegin();
-      // Base64 encode the TLV value
-      oss << Base64::encode(first_tlv->value.data(), first_tlv->value.length());
-      while (filtered_tlvs_.cend() != ++first_tlv) {
-        oss << fmt::format(", {}", Base64::encode(first_tlv->value.data(), first_tlv->value.length()));
-      }
+  int match_count = 0;
+  for (auto& tlv : typed_state->value().tlv_vector_) {
+    if (tlv.type == tlv_type_) {
+      if (match_count > 0) oss << ", ";
+      oss << Base64::encode(tlv.value.data(), tlv.value.length());
+      match_count++;
+    }
   }
+  ENVOY_LOG_MISC(debug, "Parsing proxy protocol TLVs: full length of the TLV vector is {}, and {} value(s) exist(s) with type {}", typed_state->value().tlv_vector_.size(), match_count, tlv_type_);
   return oss.str();
 }
 

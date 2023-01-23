@@ -588,7 +588,6 @@ public:
                                  const Http::ResponseTrailerMap&, const StreamInfo::StreamInfo&,
                                  absl::string_view) const override;
 private: 
-  std::vector<Network::ProxyProtocolTLV> filtered_tlvs_;   
   int tlv_type_;               
 };
 
