@@ -2129,6 +2129,20 @@ TEST(SubstitutionFormatterTest, ProxyProtocolTlvsFormatter) {
                               "Invalid parameter provided for PROXY_PROTOCOL_TLVS header: 300. Not a valid TLV type.");
   }
 
+  // ProxyProtocolFilterState is not stored in FilterState
+  {
+    NiceMock<StreamInfo::MockStreamInfo> stream_info;
+
+    EXPECT_CALL(Const(stream_info), filterState()).Times(testing::AtLeast(1));
+
+    auto providers = SubstitutionFormatParser::parse("%PROXY_PROTOCOL_TLVS(2)%");
+
+    ASSERT_EQ(providers.size(), 1);
+
+    EXPECT_EQ("", providers[0]->format(request_headers, response_headers, response_trailers,
+                                           stream_info, body));
+  }
+
   // No TLVs stored in FilterState with specified tlv_type
   {
     NiceMock<StreamInfo::MockStreamInfo> stream_info;
