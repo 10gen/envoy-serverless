@@ -2110,10 +2110,23 @@ TEST(SubstitutionFormatterTest, ProxyProtocolTlvsFormatter) {
     EXPECT_THROW_WITH_MESSAGE(SubstitutionFormatParser::parse("%PROXY_PROTOCOL_TLVS()%"), EnvoyException,
                               "PROXY_PROTOCOL_TLVS requires parameters");
   }
-  // Invalid tlv_type passed as parameter
+
+  // Invalid tlv_type passed as parameter -- non-integer
   {
     EXPECT_THROW_WITH_MESSAGE(SubstitutionFormatParser::parse("%PROXY_PROTOCOL_TLVS(INVALID_TLV_TYPE)%"), EnvoyException,
-                              "Invalid parameter provided for PROXY_PROTOCOL_TLVS header: INVALID_TLV_TYPE");
+                              "Invalid parameter provided for PROXY_PROTOCOL_TLVS header: INVALID_TLV_TYPE. Not parsable as int.");
+  }
+
+  // Invalid tlv_type passed as parameter -- too large of a number for stoi to parse as int
+  {
+    EXPECT_THROW_WITH_MESSAGE(SubstitutionFormatParser::parse("%PROXY_PROTOCOL_TLVS(3000000000)%"), EnvoyException,
+                              "Invalid parameter provided for PROXY_PROTOCOL_TLVS header: 3000000000. Not parsable as int.");
+  }
+
+  // Invalid tlv_type passed as parameter -- too large of a number to be a valid TLV type
+  {
+    EXPECT_THROW_WITH_MESSAGE(SubstitutionFormatParser::parse("%PROXY_PROTOCOL_TLVS(300)%"), EnvoyException,
+                              "Invalid parameter provided for PROXY_PROTOCOL_TLVS header: 300. Not a valid TLV type.");
   }
 
   // No TLVs stored in FilterState with specified tlv_type

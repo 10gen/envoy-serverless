@@ -1931,7 +1931,13 @@ ProxyProtocolTlvsFormatter::ProxyProtocolTlvsFormatter(const std::string& tlv_ty
   try {
     tlv_type_ = std::stoi(tlv_type_str);
   } catch (const std::invalid_argument& ex) {
-    throw EnvoyException(fmt::format("Invalid parameter provided for PROXY_PROTOCOL_TLVS header: {}", tlv_type_str));
+    throw EnvoyException(fmt::format("Invalid parameter provided for PROXY_PROTOCOL_TLVS header: {}. Not parsable as int.", tlv_type_str));
+  } catch (const std::out_of_range& ex) {
+    throw EnvoyException(fmt::format("Invalid parameter provided for PROXY_PROTOCOL_TLVS header: {}. Not parsable as int.", tlv_type_str));
+  }
+  // Check if a valid TLV type was passed in
+  if (tlv_type_ > 256) {
+    throw EnvoyException(fmt::format("Invalid parameter provided for PROXY_PROTOCOL_TLVS header: {}. Not a valid TLV type.", tlv_type_str));
   }
 }
 
