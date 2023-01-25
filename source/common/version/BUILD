@@ -62,8 +62,8 @@ envoy_cc_library(
     name = "version_includes",
     hdrs = [
         "version.h",
+        ":generate_git_version_number",
         ":generate_version_number",
-        ":generate_git_version_number"
     ],
     deps = [
         "//source/common/singleton:const_singleton",
