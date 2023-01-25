@@ -1928,15 +1928,13 @@ UpstreamHostMetadataFormatter::UpstreamHostMetadataFormatter(const std::string& 
 
 ProxyProtocolTlvsFormatter::ProxyProtocolTlvsFormatter(const std::string& tlv_type_str) {
   // Specified tlv_type must be parsable as an int.
-  TRY_ASSERT_MAIN_THREAD {
-    tlv_type_ = std::stoi(tlv_type_str);
-  } 
-  END_TRY
-  catch (const std::exception& ex) {
+  ASSERT(!tlv_type_str.empty());
+  if (!absl::SimpleAtoi(tlv_type_str, &tlv_type_)) {
     throw EnvoyException(fmt::format(
         "Invalid parameter provided for PROXY_PROTOCOL_TLVS header: {}. Not parsable as int.",
         tlv_type_str));
   }
+
   // Check if a valid TLV type was passed in.
   if (tlv_type_ >= 256 || tlv_type_ <= 0) {
     throw EnvoyException(fmt::format("Invalid parameter provided for PROXY_PROTOCOL_TLVS header: "
@@ -1945,9 +1943,6 @@ ProxyProtocolTlvsFormatter::ProxyProtocolTlvsFormatter(const std::string& tlv_ty
   }
 }
 
-// Parses the proxy protocol TLVs stored in the FilterState with the key
-// "envoy.network.proxy_protocol_options" and returns a function suitable for accessing the
-// specified metadata from a StreamInfo::StreamInfo.
 absl::optional<std::string> ProxyProtocolTlvsFormatter::format(
     const Http::RequestHeaderMap&, const Http::ResponseHeaderMap&, const Http::ResponseTrailerMap&,
     const StreamInfo::StreamInfo& stream_info, absl::string_view) const {
