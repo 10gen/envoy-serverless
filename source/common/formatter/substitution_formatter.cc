@@ -466,7 +466,7 @@ SubstitutionFormatParser::getKnownFormatters() {
          [](const std::string& format, const absl::optional<size_t>& max_length) {
            return FilterStateFormatter::create(format, max_length, true);
          }}},
-      {"PROXY_PROTOCOL_TLVS",
+       {"PROXY_PROTOCOL_TLVS",
         {CommandSyntaxChecker::PARAMS_REQUIRED,
          [](const std::string& tlv_type, const absl::optional<size_t>&) {
            return std::make_unique<ProxyProtocolTlvsFormatter>(tlv_type);
@@ -1930,42 +1930,51 @@ ProxyProtocolTlvsFormatter::ProxyProtocolTlvsFormatter(const std::string& tlv_ty
   // Specified tlv_type must be parsable as an int.
   try {
     tlv_type_ = std::stoi(tlv_type_str);
-  } catch (const std::invalid_argument& ex) {
-    throw EnvoyException(fmt::format("Invalid parameter provided for PROXY_PROTOCOL_TLVS header: {}. Not parsable as int.", tlv_type_str));
-  } catch (const std::out_of_range& ex) {
-    throw EnvoyException(fmt::format("Invalid parameter provided for PROXY_PROTOCOL_TLVS header: {}. Not parsable as int.", tlv_type_str));
+  } catch (const std::exception& ex) {
+    throw EnvoyException(fmt::format(
+        "Invalid parameter provided for PROXY_PROTOCOL_TLVS header: {}. Not parsable as int.",
+        tlv_type_str));
   }
-  // Check if a valid TLV type was passed in
-  if (tlv_type_ > 256) {
-    throw EnvoyException(fmt::format("Invalid parameter provided for PROXY_PROTOCOL_TLVS header: {}. Not a valid TLV type.", tlv_type_str));
+
+  // Check if a valid TLV type was passed in.
+  if (tlv_type_ >= 256 || tlv_type_ <= 0) {
+    throw EnvoyException(fmt::format("Invalid parameter provided for PROXY_PROTOCOL_TLVS header: "
+                                     "{}. Must be a positive integer less than 256.",
+                                     tlv_type_str));
   }
 }
 
-// Parses the proxy protocol TLVs stored in the FilterState with the key "envoy.network.proxy_protocol_options" 
-// and returns a function suitable for accessing the specified metadata from a StreamInfo::StreamInfo. 
-absl::optional<std::string> ProxyProtocolTlvsFormatter::format(const Http::RequestHeaderMap&,
-                                                        const Http::ResponseHeaderMap&,
-                                                        const Http::ResponseTrailerMap&,
-                                                        const StreamInfo::StreamInfo& stream_info,
-                                                        absl::string_view) const {
-  const auto& typed_state = stream_info.filterState().getDataReadOnly<Network::ProxyProtocolFilterState>(Network::ProxyProtocolFilterState::key());
+// Parses the proxy protocol TLVs stored in the FilterState with the key
+// "envoy.network.proxy_protocol_options" and returns a function suitable for accessing the
+// specified metadata from a StreamInfo::StreamInfo.
+absl::optional<std::string> ProxyProtocolTlvsFormatter::format(
+    const Http::RequestHeaderMap&, const Http::ResponseHeaderMap&, const Http::ResponseTrailerMap&,
+    const StreamInfo::StreamInfo& stream_info, absl::string_view) const {
+  const auto& typed_state =
+      stream_info.filterState().getDataReadOnly<Network::ProxyProtocolFilterState>(
+          Network::ProxyProtocolFilterState::key());
 
-  // ProxyProtocolFilterState is not stored in the filter state. 
+  // ProxyProtocolFilterState is not stored in the filter state.
   if (typed_state == nullptr) {
-    ENVOY_LOG_MISC(debug, "Invalid header: PROXY_PROTOCOL_TLVS. The ProxyProtocolFilterState is not stored in the filter state.");
-    return std::string();
+    ENVOY_LOG_MISC(debug, "Invalid header: PROXY_PROTOCOL_TLVS. The ProxyProtocolFilterState is "
+                          "not stored in the filter state.");
+    return absl::nullopt;
   }
 
   std::ostringstream oss;
   int match_count = 0;
   for (auto& tlv : typed_state->value().tlv_vector_) {
     if (tlv.type == tlv_type_) {
-      if (match_count > 0) oss << ", ";
+      if (match_count > 0)
+        oss << ", ";
       oss << Base64::encode(tlv.value.data(), tlv.value.length());
       match_count++;
     }
   }
-  ENVOY_LOG_MISC(debug, "Parsing proxy protocol TLVs: full length of the TLV vector is {}, and {} value(s) exist(s) with type {}", typed_state->value().tlv_vector_.size(), match_count, tlv_type_);
+  ENVOY_LOG_MISC(
+      debug,
+      "Formatting PROXY_PROTOCOL_TLVS header: {} TLVs are stored. {} with type {} added to header.",
+      typed_state->value().tlv_vector_.size(), match_count, tlv_type_);
   return oss.str();
 }
 

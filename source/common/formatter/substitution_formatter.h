@@ -587,8 +587,9 @@ public:
   ProtobufWkt::Value formatValue(const Http::RequestHeaderMap&, const Http::ResponseHeaderMap&,
                                  const Http::ResponseTrailerMap&, const StreamInfo::StreamInfo&,
                                  absl::string_view) const override;
-private: 
-  int tlv_type_;               
+
+private:
+  int tlv_type_;
 };
 
 /**
