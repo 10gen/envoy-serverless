@@ -1928,14 +1928,15 @@ UpstreamHostMetadataFormatter::UpstreamHostMetadataFormatter(const std::string& 
 
 ProxyProtocolTlvsFormatter::ProxyProtocolTlvsFormatter(const std::string& tlv_type_str) {
   // Specified tlv_type must be parsable as an int.
-  try {
+  TRY_ASSERT_MAIN_THREAD {
     tlv_type_ = std::stoi(tlv_type_str);
-  } catch (const std::exception& ex) {
+  } 
+  END_TRY
+  catch (const std::exception& ex) {
     throw EnvoyException(fmt::format(
         "Invalid parameter provided for PROXY_PROTOCOL_TLVS header: {}. Not parsable as int.",
         tlv_type_str));
   }
-
   // Check if a valid TLV type was passed in.
   if (tlv_type_ >= 256 || tlv_type_ <= 0) {
     throw EnvoyException(fmt::format("Invalid parameter provided for PROXY_PROTOCOL_TLVS header: "
