@@ -1,5 +1,6 @@
 tasks:
 - name: compile
+  tags: ["pr_check"]
   commands:
     - command: git.get_project
       params:
@@ -8,6 +9,7 @@ tasks:
     - func: "archive"
     - func: "s3 upload archive"
 - name: test
+  tags: ["pr_check"]
   commands:
     - command: git.get_project
       params:
@@ -88,6 +90,7 @@ functions:
 
 buildvariants:
 - name: centos7
+  tags: ["pr_check"]
   display_name: CentOS 7
   run_on:
     # Tasks run in x86 CentOS7 containers, so the Linux distro doesn't have to match.
