@@ -9,7 +9,7 @@ cd $SRCDIR
 # an abbreviated object name for the commit. The leading "v" is then omitted.
 # --dirty: If the working tree has local modification "-dirty" is appended to it.
 # --always: Show uniquely abbreviated commit object as fallback when no tag is found.
-VERSION=$(git describe --tags --dirty --always --match 'v[0-9]*' | cut -c 2-)
+VERSION=$(git describe --tags --dirty --always --match 'v[0-9]*' --abbrev=7 | cut -c 2-)
 cd -
 
 # The archives have to be put in a directory because evergreen s3.put will scan the working directory
