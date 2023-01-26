@@ -133,7 +133,7 @@ private:
   size_t search_index_{1};
 
   ProxyProtocolVersion header_version_{Unknown};
- 
+
   ConfigSharedPtr config_;
 
   absl::optional<WireHeader> proxy_protocol_header_;
@@ -141,7 +141,6 @@ private:
 
   // Store the parsed proxy protocol TLVs.
   Network::ProxyProtocolTLVVector parsed_tlvs_;
-
 };
 
 } // namespace ProxyProtocol
