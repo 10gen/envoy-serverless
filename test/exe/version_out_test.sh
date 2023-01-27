@@ -32,7 +32,8 @@ LABEL=$(${ENVOY_BIN} --version | \
 
 EXPECTED="$(cat "${TEST_SRCDIR}/envoy/bazel/raw_build_id.ldscript")"
 
+# Note: This test uses bash pattern-matching to assert that the start of EXPECTED, i.e. the commit id, matches the value of LABEL, i.e. the abbreviated object name for the commit.
 if [[ "${EXPECTED}" != "${LABEL}"* ]]; then
-  echo "Label mismatch, expected: ${EXPECTED} to start with: ${LABEL},".
+  echo "Label mismatch, expected: ${EXPECTED} to start with: ${LABEL}".
   exit 1
 fi

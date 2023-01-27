@@ -9,6 +9,7 @@ cd $SRCDIR
 # an abbreviated object name for the commit. The leading "v" is then omitted.
 # --dirty: If the working tree has local modification "-dirty" is appended to it.
 # --always: Show uniquely abbreviated commit object as fallback when no tag is found.
+# --abbrev=<n>: Sets the length of the abbreviated commit object name to n.
 VERSION=$(git describe --tags --dirty --always --match 'v[0-9]*' --abbrev=7 | cut -c 2-)
 cd -
 
