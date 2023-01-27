@@ -7,7 +7,6 @@
 #include <cstdlib>
 #include <memory>
 #include <regex>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
