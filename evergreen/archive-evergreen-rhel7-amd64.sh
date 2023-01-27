@@ -4,7 +4,7 @@ set -xeuo pipefail
 SRCDIR=$(pwd)/src
 cd $SRCDIR
 # Generate version from the most recent base tag.
-# For example, 1.21.3-4-gdbdcfa34cf is based on the most recent tag "v1.21.3" and
+# For example, 1.21.3-4-gdbdcfa3 is based on the most recent tag "v1.21.3" and
 # has "4" commits on top of that, then it appends the "g" prefix (for git) and
 # an abbreviated object name for the commit. The leading "v" is then omitted.
 # --dirty: If the working tree has local modification "-dirty" is appended to it.
@@ -18,7 +18,7 @@ cd -
 # the docker containers cannot be accessed due to permissions, leading to a failure. Changing the
 # working directory to "ARCHIVE_PATH" is a workaround.
 ARCHIVE_PATH=archive
-# Example archive file name: envoy-serverless-1.21.3-4-gdbdcfa34cf.rhel7.amd64.tar.gz
+# Example archive file name: envoy-serverless-1.21.3-4-gdbdcfa3.rhel7.amd64.tar.gz
 ARCHIVE_DIR=envoy-serverless-${VERSION}.rhel7.amd64
 mkdir -p ${ARCHIVE_PATH}/${ARCHIVE_DIR}
 
