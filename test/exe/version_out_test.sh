@@ -28,11 +28,12 @@ if [[ "${VERSION}" != "${EXPECTED}" ]]; then
 fi
 
 LABEL=$(${ENVOY_BIN} --version | \
-  sed -n -E "s/.*version: ([0-9a-f]{40})\/([0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)-g([0-9a-f]{10})(-dirty)?\/(Clean|Modified)\/(RELEASE|DEBUG)\/([a-zA-Z-]+)$/\4/p")
+  sed -n -E "s/.*version: ([0-9a-f]{40})\/([0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)-g([0-9a-f]+)(-dirty)?\/(Clean|Modified)\/(RELEASE|DEBUG)\/([a-zA-Z-]+)$/\4/p")
 
-EXPECTED="$(cat "${TEST_SRCDIR}/envoy/bazel/raw_build_id.ldscript" | head -c 10)"
+EXPECTED="$(cat "${TEST_SRCDIR}/envoy/bazel/raw_build_id.ldscript")"
 
-if [[ "${LABEL}" != "${EXPECTED}" ]]; then
-  echo "Label mismatch, got: ${LABEL}, expected: ${EXPECTED}".
+# Note: This test uses bash pattern-matching to assert that the start of EXPECTED, i.e. the commit id, matches the value of LABEL, i.e. the abbreviated object name for the commit.
+if [[ "${EXPECTED}" != "${LABEL}"* ]]; then
+  echo "Label mismatch, expected: ${EXPECTED} to start with: ${LABEL}".
   exit 1
 fi
