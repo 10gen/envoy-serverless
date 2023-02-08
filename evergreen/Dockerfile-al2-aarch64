@@ -12,7 +12,7 @@ RUN ln -sf $(which cmake3) /usr/local/bin/cmake
 
 # To build wee8 we need ninja version >= 1.8.2.
 # wee8 contains such binaries in the third_party but not for aarch64.
-# So it will fallback to the system ninja and here we go.
+# So it will fall back to the system ninja and not work properly.
 ARG NINJA_DIR="ninja-1.8.2"
 ARG NINJA_URL="https://github.com/ninja-build/ninja/archive/refs/tags/v1.8.2.tar.gz"
 RUN curl -L ${NINJA_URL} -OJ && tar xf ${NINJA_DIR}.tar.gz && python ./${NINJA_DIR}/configure.py --bootstrap && mv ninja /usr/local/bin
@@ -26,5 +26,5 @@ RUN curl -L ${LLD_URL} -OJ && tar xf ${LLD_DIR}.tar.xz && cmake3 -GNinja -S ./${
 ARG BAZEL_URL="https://github.com/bazelbuild/bazelisk/releases/download/v1.9.0/bazelisk-linux-arm64"
 RUN curl -L -o /usr/local/bin/bazel ${BAZEL_URL} && chmod +x /usr/local/bin/bazel
 
-# Silent the error that git detected dubious ownership in repository.
+# Silence the error that git detected dubious ownership in repository.
 RUN git config --global --add safe.directory '*'
