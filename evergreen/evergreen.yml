@@ -29,19 +29,26 @@ functions:
     params:
       binary: bash
       args:
-      - "src/evergreen/compile-centos7-evergreen.sh"
+      - "src/evergreen/compile-evergreen.sh"
+      env:
+        DOCKER_IMAGE: ${docker_image}
   "test envoy":
     command: subprocess.exec
     params:
       binary: bash
       args:
-      - "src/evergreen/test-centos7-evergreen.sh"
+      - "src/evergreen/test-evergreen.sh"
+      env:
+        DOCKER_IMAGE: ${docker_image}
   "archive":
     command: subprocess.exec
     params:
       binary: bash
       args:
-      - "src/evergreen/archive-evergreen-rhel7-amd64.sh"
+      - "src/evergreen/archive-evergreen.sh"
+      env:
+        DISTRO: ${distro}
+        ARCH: ${arch}
   # Upload archives to the S3 directory for this build.
   "s3 upload archive":
     command: s3.put
@@ -91,10 +98,29 @@ functions:
 buildvariants:
 - name: centos7
   tags: ["pr_check"]
-  display_name: CentOS 7
+  display_name: CentOS 7 x86_64
   run_on:
     # Tasks run in x86 CentOS7 containers, so the Linux distro doesn't have to match.
     - rhel80-xlarge
+  expansions:
+    docker_image: docker.io/siyuanzhou/envoy-serverless-centos7
+    distro: rhel7
+    arch: x86_64
+  tasks:
+  - name: compile
+  - name: test
+  - name: push
+
+- name: al2-aarch64
+  tags: ["pr_check"]
+  display_name: Amazon Linux 2 aarch64
+  run_on:
+    # Tasks run in Amazon Linux 2 containers, so the Linux distro doesn't have to match.
+    - rhel82-arm64-large
+  expansions:
+    docker_image: docker.io/siyuanzhou/envoy-serverless-al2-aarch64
+    distro: al2
+    arch: aarch64
   tasks:
   - name: compile
   - name: test

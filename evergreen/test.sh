@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# This script runs in a container built from Dockerfile-centos7.
+# This script runs in a container built from the Dockerfile.
 # It assumes the workspace directory is mounted on /etc/envoy-serverless and the build directory is optionally mounted on /build
 
 set -euo pipefail
 set -x
 
-source $(dirname "$0")/set-up-env-centos7.sh
+source $(dirname "$0")/set-up-env.sh
 
 # Test targets listed in repo's .bazelci config
 export bazel_tests="//test/common/common/... //test/integration/... //test/exe/..."
