@@ -1,4 +1,7 @@
 #!/bin/bash
+
+# Assume $DISTRO and $ARCH are set.
+
 set -xeuo pipefail
 
 SRCDIR=$(pwd)/src
@@ -17,13 +20,18 @@ cd -
 # the docker containers cannot be accessed due to permissions, leading to a failure. Changing the
 # working directory to "ARCHIVE_PATH" is a workaround.
 ARCHIVE_PATH=archive
-# Example archive file name: envoy-serverless-1.21.3-4-gdbdcfa34cf.rhel7.amd64.tar.gz
-ARCHIVE_DIR=envoy-serverless-${VERSION}.rhel7.amd64
+# Example archive file name: envoy-serverless-1.21.3-4-gdbdcfa3.rhel7.amd64.tar.gz
+ARCHIVE_DIR=envoy-serverless-${VERSION}.${DISTRO}.${ARCH}
 mkdir -p ${ARCHIVE_PATH}/${ARCHIVE_DIR}
 
+if [ $ARCH == "aarch64" ]; then
+	OUTPUT_DIR="aarch64-opt"
+else
+	OUTPUT_DIR="k8-opt"
+fi
 # Only include the envoy binary and the hot-restarter. The start script and the static config should
 # be prepared by the agent.
-cp build/execroot/envoy/bazel-out/k8-opt/bin/source/exe/envoy-static ${ARCHIVE_PATH}/${ARCHIVE_DIR}/envoy-serverless
+cp build/execroot/envoy/bazel-out/$OUTPUT_DIR/bin/source/exe/envoy-static ${ARCHIVE_PATH}/${ARCHIVE_DIR}/envoy-serverless
 cp ${SRCDIR}/restarter/hot-restarter.py ${ARCHIVE_PATH}/${ARCHIVE_DIR}/
 cd ${ARCHIVE_PATH}
 tar -zcvf ${ARCHIVE_DIR}.tar.gz ${ARCHIVE_DIR}
