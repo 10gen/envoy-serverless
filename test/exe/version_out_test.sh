@@ -8,7 +8,7 @@ export LC_ALL=C
 ENVOY_BIN="${TEST_SRCDIR}/envoy/source/exe/envoy-static"
 
 COMMIT=$(${ENVOY_BIN} --version | \
-  sed -n -E 's/.*version: ([0-9a-f]{40})\/([0-9]+\.[0-9]+\.[0-9]+)(-[a-zA-Z0-9\-_]+)?\/(Clean|Modified)\/(RELEASE|DEBUG)\/([a-zA-Z-]+)$/\1/p')
+  sed -n -E 's/.*version: ([0-9a-f]{40})\/([0-9]+\.[0-9]+\.[0-9]+)(-[a-zA-Z0-9_\-]+)?\/(Clean|Modified)\/(RELEASE|DEBUG)\/([a-zA-Z-]+)$/\1/p')
 
 EXPECTED=$(cat "${TEST_SRCDIR}/envoy/bazel/raw_build_id.ldscript")
 
@@ -18,11 +18,22 @@ if [[ "${COMMIT}" != "${EXPECTED}" ]]; then
 fi
 
 VERSION=$(${ENVOY_BIN} --version | \
-  sed -n -E 's/.*version: ([0-9a-f]{40})\/([0-9]+\.[0-9]+\.[0-9]+)(-[a-zA-Z0-9\-_]+)?\/(Clean|Modified)\/(RELEASE|DEBUG)\/([a-zA-Z-]+)$/\2\3/p')
+  sed -n -E 's/.*version: ([0-9a-f]{40})\/([0-9]+\.[0-9]+\.[0-9]+)(-[a-zA-Z0-9_\-]+)?\/(Clean|Modified)\/(RELEASE|DEBUG)\/([a-zA-Z-]+)$/\2/p')
 
 EXPECTED=$(cat "${TEST_SRCDIR}/envoy/VERSION")
 
 if [[ "${VERSION}" != "${EXPECTED}" ]]; then
   echo "Version mismatch, got: ${VERSION}, expected: ${EXPECTED}".
+  exit 1
+fi
+
+LABEL=$(${ENVOY_BIN} --version | \
+  sed -n -E "s/.*version: ([0-9a-f]{40})\/([0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)-g([0-9a-f]+)(-dirty)?\/(Clean|Modified)\/(RELEASE|DEBUG)\/([a-zA-Z-]+)$/\4/p")
+
+EXPECTED="$(cat "${TEST_SRCDIR}/envoy/bazel/raw_build_id.ldscript")"
+
+# Note: This test uses bash pattern-matching to assert that the start of EXPECTED, i.e. the commit id, matches the value of LABEL, i.e. the abbreviated object name for the commit.
+if [[ "${EXPECTED}" != "${LABEL}"* ]]; then
+  echo "Label mismatch, expected: ${EXPECTED} to start with: ${LABEL}".
   exit 1
 fi
