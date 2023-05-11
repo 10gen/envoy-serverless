@@ -38,6 +38,17 @@ genrule(
 )
 
 genrule(
+    name = "git_version",
+    outs = ["git_version.txt"],
+    cmd = """
+    grep GIT_VERSION bazel-out/volatile-status.txt > $@
+    """,
+    # Undocumented attr to depend on workspace status files.
+    # https://github.com/bazelbuild/bazel/issues/4942
+    stamp = 1,
+)
+
+genrule(
     name = "gnu_build_id",
     outs = ["gnu_build_id.ldscript"],
     cmd = """

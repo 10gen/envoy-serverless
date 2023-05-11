@@ -20,7 +20,7 @@ fi
 VERSION=$(${ENVOY_BIN} --version | \
   sed -n -E 's/.*version: ([0-9a-f]{40})\/([0-9]+\.[0-9]+\.[0-9]+)(-[a-zA-Z0-9_\-]+)?\/(Clean|Modified)\/(RELEASE|DEBUG)\/([a-zA-Z-]+)$/\2\3/p')
 
-EXPECTED=$(cat "${TEST_SRCDIR}/envoy/VERSION.txt")
+EXPECTED=$(cat "${TEST_SRCDIR}/envoy/bazel/git_versions.txt")
 
 if [[ "${VERSION}" != "${EXPECTED}" ]]; then
   echo "Version mismatch, got: ${VERSION}, expected: ${EXPECTED}".

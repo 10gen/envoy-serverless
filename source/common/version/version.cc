@@ -30,7 +30,7 @@ const std::string& VersionInfo::revisionStatus() {
 
 const std::string& VersionInfo::version() {
   CONSTRUCT_ON_FIRST_USE(std::string,
-                         fmt::format("{}/{}/{}/{}/{}", revision(), BUILD_VERSION_NUMBER,
+                         fmt::format("{}/{}/{}/{}/{}", revision(), GIT_VERSION_NUMBER,
                                      revisionStatus(), buildType(), sslVersion()));
 }
 
