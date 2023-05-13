@@ -41,7 +41,9 @@ genrule(
     name = "git_version",
     outs = ["git_version.txt"],
     cmd = """
-    grep GIT_VERSION bazel-out/volatile-status.txt > $@
+    grep GIT_VERSION_NUMBER bazel-out/volatile-status.txt  \\
+    | sed 's/^GIT_VERSION_NUMBER //' \\
+    > $@
     """,
     # Undocumented attr to depend on workspace status files.
     # https://github.com/bazelbuild/bazel/issues/4942
