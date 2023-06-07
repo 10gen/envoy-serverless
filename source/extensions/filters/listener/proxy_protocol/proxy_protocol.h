@@ -56,6 +56,11 @@ public:
   const KeyValuePair* isTlvTypeNeeded(uint8_t type) const;
 
   /**
+   * Return true if the type of TLV is needed for pass-through.
+   */
+  bool isPassThroughTlvTypeNeeded(uint8_t type) const;
+
+  /**
    * Number of TLV types that need to be parsed and saved to dynamic metadata.
    */
   size_t numberOfNeededTlvTypes() const;
@@ -128,6 +133,24 @@ private:
   size_t search_index_{1};
 
   ProxyProtocolVersion header_version_{Unknown};
+
+  // Stores the portion of the first line that has been read so far.
+  char buf_[MAX_PROXY_PROTO_LEN_V2];
+
+  /**
+   * Store the extension TLVs if they need to be read.
+   */
+  std::vector<uint8_t> buf_tlv_;
+
+  /**
+   * The index in buf_tlv_ that has been fully read.
+   */
+  size_t buf_tlv_off_{};
+
+  /*
+   * Store the parsed proxy protocol TLVs.
+   */
+  Network::ProxyProtocolTLVVector parsed_tlvs_;
 
   ConfigSharedPtr config_;
 
