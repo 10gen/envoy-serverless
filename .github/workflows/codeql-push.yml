@@ -71,8 +71,4 @@ jobs:
 
     - name: Perform CodeQL Analysis
       if: env.BUILD_TARGETS != ''
-<<<<<<< HEAD
-      uses: github/codeql-action/analyze@75f07e7ab2ee63cba88752d8c696324e4df67466
-=======
       uses: github/codeql-action/analyze@3e7e3b32d0fb8283594bb0a76cc60a00918b0969
->>>>>>> v1.23.0

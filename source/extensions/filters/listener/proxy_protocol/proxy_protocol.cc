@@ -419,8 +419,13 @@ bool Filter::parseTlvs(const uint8_t* buf, size_t len) {
   return true;
 }
 
-<<<<<<< HEAD
 ReadOrParseState Filter::readExtensions(Network::IoHandle& io_handle) {
+  auto raw_slice = buffer.rawSlice();
+  // waiting for more data if there is no enough data for extensions.
+  if (raw_slice.len_ < (proxy_protocol_header_.value().wholeHeaderLength())) {
+    return ReadOrParseState::TryAgainLater;
+  }
+  
   // Parse and discard the extensions if this is a local command.
   if (proxy_protocol_header_.value().local_command_) {
     // buf_ is no longer in use so we re-use it to read/discard.
@@ -430,14 +435,7 @@ ReadOrParseState Filter::readExtensions(Network::IoHandle& io_handle) {
   // Initialize the buf_tlv_ only when we need to read the TLVs.
   if (buf_tlv_.empty()) {
     buf_tlv_.resize(proxy_protocol_header_.value().extensions_length_);
-=======
 ReadOrParseState Filter::readExtensions(Network::ListenerFilterBuffer& buffer) {
-  auto raw_slice = buffer.rawSlice();
-  // waiting for more data if there is no enough data for extensions.
-  if (raw_slice.len_ < (proxy_protocol_header_.value().wholeHeaderLength())) {
-    return ReadOrParseState::TryAgainLater;
->>>>>>> v1.23.0
-  }
 
   if (proxy_protocol_header_.value().local_command_ || 0 == config_->numberOfNeededTlvTypes()) {
     // Ignores the extensions if this is a local command or there's no TLV needs to be saved

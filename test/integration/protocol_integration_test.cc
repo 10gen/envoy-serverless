@@ -3615,12 +3615,8 @@ TEST_P(ProtocolIntegrationTest, BufferContinue) {
       });
 
   useAccessLog();
-<<<<<<< HEAD
   config_helper_.addFilter("{ name: buffer-continue-filter, typed_config: { \"@type\": "
                            "type.googleapis.com/google.protobuf.Empty } }");
-=======
-  config_helper_.addFilter("{ name: buffer-continue-filter }");
->>>>>>> v1.23.0
   config_helper_.setBufferLimits(1024, 1024);
   initialize();
 

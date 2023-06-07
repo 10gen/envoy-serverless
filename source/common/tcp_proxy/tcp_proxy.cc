@@ -603,11 +603,8 @@ void Filter::onDownstreamEvent(Network::ConnectionEvent event) {
   if (event == Network::ConnectionEvent::LocalClose ||
       event == Network::ConnectionEvent::RemoteClose) {
     downstream_closed_ = true;
-<<<<<<< HEAD
-=======
     // Cancel the potential odcds callback.
     cluster_discovery_handle_ = nullptr;
->>>>>>> v1.23.0
   }
 
   ENVOY_CONN_LOG(trace, "on downstream event {}, has upstream = {}", read_callbacks_->connection(),
