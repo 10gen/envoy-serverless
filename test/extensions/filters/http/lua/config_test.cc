@@ -19,13 +19,32 @@ namespace HttpFilters {
 namespace Lua {
 namespace {
 
-TEST(LuaFilterConfigTest, ValidateFail) {
+TEST(LuaFilterConfigTest, ValidateEmptyConfigNotFail) {
   NiceMock<Server::Configuration::MockFactoryContext> context;
-  EXPECT_THROW(LuaFilterConfig().createFilterFactoryFromProto(
-                   envoy::extensions::filters::http::lua::v3::Lua(), "stats", context),
-               ProtoValidationException);
+  EXPECT_NO_THROW(LuaFilterConfig().createFilterFactoryFromProto(
+      envoy::extensions::filters::http::lua::v3::Lua(), "stats", context));
 }
 
+TEST(LuaFilterConfigTest, LuaFilterWithDefaultSourceCode) {
+  const std::string yaml_string = R"EOF(
+  default_source_code:
+    inline_string: |
+      function envoy_on_request(request_handle)
+        request_handle:headers():add("code", "code_from_hello")
+      end
+  )EOF";
+
+  envoy::extensions::filters::http::lua::v3::Lua proto_config;
+  TestUtility::loadFromYaml(yaml_string, proto_config);
+  NiceMock<Server::Configuration::MockFactoryContext> context;
+  LuaFilterConfig factory;
+  Http::FilterFactoryCb cb = factory.createFilterFactoryFromProto(proto_config, "stats", context);
+  Http::MockFilterChainFactoryCallbacks filter_callback;
+  EXPECT_CALL(filter_callback, addStreamFilter(_));
+  cb(filter_callback);
+}
+
+#ifndef ENVOY_DISABLE_DEPRECATED_FEATURES
 TEST(LuaFilterConfigTest, LuaFilterInJson) {
   const std::string yaml_string = R"EOF(
   inline_code : "print(5)"
@@ -41,16 +60,46 @@ TEST(LuaFilterConfigTest, LuaFilterInJson) {
   cb(filter_callback);
 }
 
-// Test that the deprecated extension name is disabled by default.
-// TODO(zuercher): remove when envoy.deprecated_features.allow_deprecated_extension_names is removed
-TEST(LuaFilterConfigTest, DEPRECATED_FEATURE_TEST(DeprecatedExtensionFilterName)) {
-  const std::string deprecated_name = "envoy.lua";
+TEST(LuaFilterConfigTest, LuaFilterWithDeprecatedInlineCode) {
+  const std::string yaml_string = R"EOF(
+  inline_code: |
+    function envoy_on_request(request_handle)
+      request_handle:headers():add("code", "code_from_hello")
+    end
+  )EOF";
 
-  ASSERT_EQ(
-      nullptr,
-      Registry::FactoryRegistry<Server::Configuration::NamedHttpFilterConfigFactory>::getFactory(
-          deprecated_name));
+  envoy::extensions::filters::http::lua::v3::Lua proto_config;
+  TestUtility::loadFromYaml(yaml_string, proto_config);
+  NiceMock<Server::Configuration::MockFactoryContext> context;
+  LuaFilterConfig factory;
+  Http::FilterFactoryCb cb = factory.createFilterFactoryFromProto(proto_config, "stats", context);
+  Http::MockFilterChainFactoryCallbacks filter_callback;
+  EXPECT_CALL(filter_callback, addStreamFilter(_));
+  cb(filter_callback);
 }
+
+TEST(LuaFilterConfigTest, LuaFilterWithBothDeprecatedInlineCodeAndDefaultSourceCode) {
+  const std::string yaml_string = R"EOF(
+  default_source_code:
+    inline_string: |
+      function envoy_on_request(request_handle)
+        request_handle:headers():add("code", "code_from_hello")
+      end
+  inline_code: |
+    function envoy_on_request(request_handle)
+      request_handle:headers():add("code", "code_from_hello")
+    end
+  )EOF";
+
+  envoy::extensions::filters::http::lua::v3::Lua proto_config;
+  TestUtility::loadFromYaml(yaml_string, proto_config);
+  NiceMock<Server::Configuration::MockFactoryContext> context;
+  LuaFilterConfig factory;
+  EXPECT_THROW_WITH_MESSAGE(
+      factory.createFilterFactoryFromProto(proto_config, "stats", context), EnvoyException,
+      "Error: Only one of `inline_code` or `default_source_code` can be set for the Lua filter.");
+}
+#endif
 
 } // namespace
 } // namespace Lua

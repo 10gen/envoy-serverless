@@ -1,32 +1,25 @@
 #pragma once
 
-#include "source/common/quic/envoy_quic_client_connection.h"
-#include "source/common/quic/envoy_quic_server_connection.h"
-#include "source/common/quic/quic_filter_manager_connection_impl.h"
+#include "envoy/common/optref.h"
 
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#pragma GCC diagnostic ignored "-Winvalid-offsetof"
-#endif
+#include "source/common/quic/envoy_quic_client_connection.h"
+#include "source/common/quic/envoy_quic_client_session.h"
+#include "source/common/quic/envoy_quic_proof_verifier.h"
+#include "source/common/quic/envoy_quic_server_connection.h"
+#include "source/common/quic/envoy_quic_utils.h"
+#include "source/common/quic/quic_filter_manager_connection_impl.h"
+#include "source/common/stats/isolated_store_impl.h"
+
+#include "test/test_common/environment.h"
 
 #include "quiche/quic/core/http/quic_spdy_session.h"
-#include "quiche/quic/test_tools/quic_test_utils.h"
-#include "quiche/quic/test_tools/first_flight.h"
 #include "quiche/quic/core/quic_utils.h"
 #include "quiche/quic/test_tools/crypto_test_utils.h"
-#include "quiche/quic/test_tools/quic_config_peer.h"
-#include "quiche/quic/test_tools/qpack/qpack_test_utils.h"
+#include "quiche/quic/test_tools/first_flight.h"
 #include "quiche/quic/test_tools/qpack/qpack_encoder_test_utils.h"
-
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
-
-#include "source/common/quic/envoy_quic_utils.h"
-#include "source/common/quic/envoy_quic_client_session.h"
-#include "test/test_common/environment.h"
-#include "source/common/stats/isolated_store_impl.h"
+#include "quiche/quic/test_tools/qpack/qpack_test_utils.h"
+#include "quiche/quic/test_tools/quic_config_peer.h"
+#include "quiche/quic/test_tools/quic_test_utils.h"
 
 namespace Envoy {
 namespace Quic {
@@ -152,10 +145,16 @@ public:
                                     quic::QuicCryptoClientConfig* crypto_config,
                                     quic::QuicCryptoClientStream::ProofHandler* proof_handler,
                                     bool has_application_state) override {
+    last_verify_context_ = *verify_context;
     return std::make_unique<TestQuicCryptoClientStream>(server_id, session,
                                                         std::move(verify_context), crypto_config,
                                                         proof_handler, has_application_state);
   }
+
+  OptRef<quic::ProofVerifyContext> lastVerifyContext() const { return last_verify_context_; }
+
+private:
+  OptRef<quic::ProofVerifyContext> last_verify_context_;
 };
 
 class MockEnvoyQuicClientSession : public EnvoyQuicClientSession {
@@ -170,7 +169,7 @@ public:
                                std::make_shared<quic::QuicCryptoClientConfig>(
                                    quic::test::crypto_test_utils::ProofVerifierForTesting()),
                                nullptr, dispatcher, send_buffer_limit, crypto_stream_factory,
-                               quic_stat_names_, stats_store_) {}
+                               quic_stat_names_, {}, stats_store_, nullptr) {}
 
   void Initialize() override {
     EnvoyQuicClientSession::Initialize();
@@ -249,8 +248,9 @@ std::string spdyHeaderToHttp3StreamPayload(const spdy::SpdyHeaderBlock& header) 
 }
 
 std::string bodyToHttp3StreamPayload(const std::string& body) {
-  quic::SimpleBufferAllocator allocator;
-  quic::QuicBuffer header = quic::HttpEncoder::SerializeDataFrameHeader(body.length(), &allocator);
+  quiche::SimpleBufferAllocator allocator;
+  quiche::QuicheBuffer header =
+      quic::HttpEncoder::SerializeDataFrameHeader(body.length(), &allocator);
   return absl::StrCat(header.AsStringView(), body);
 }
 
@@ -275,6 +275,14 @@ std::string testParamsToString(
   std::string ip_version = params.param.first == Network::Address::IpVersion::v4 ? "IPv4" : "IPv6";
   return absl::StrCat(ip_version, quic::QuicVersionToString(params.param.second.transport_version));
 }
+
+class MockProofVerifyContext : public EnvoyQuicProofVerifyContext {
+public:
+  MOCK_METHOD(Event::Dispatcher&, dispatcher, (), (const));
+  MOCK_METHOD(bool, isServer, (), (const));
+  MOCK_METHOD(const Network::TransportSocketOptionsConstSharedPtr&, transportSocketOptions, (),
+              (const));
+};
 
 } // namespace Quic
 } // namespace Envoy

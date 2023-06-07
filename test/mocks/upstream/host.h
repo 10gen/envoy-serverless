@@ -9,7 +9,7 @@
 #include "envoy/data/cluster/v3/outlier_detection_event.pb.h"
 #include "envoy/upstream/upstream.h"
 
-#include "source/common/stats/symbol_table_impl.h"
+#include "source/common/stats/symbol_table.h"
 
 #include "test/mocks/network/transport_socket.h"
 #include "test/mocks/upstream/cluster_info.h"
@@ -91,12 +91,14 @@ public:
   MOCK_METHOD(MetadataConstSharedPtr, metadata, (), (const));
   MOCK_METHOD(void, metadata, (MetadataConstSharedPtr));
   MOCK_METHOD(const ClusterInfo&, cluster, (), (const));
+  MOCK_METHOD(bool, canCreateConnection, (Upstream::ResourcePriority), (const));
   MOCK_METHOD(Outlier::DetectorHostMonitor&, outlierDetector, (), (const));
   MOCK_METHOD(HealthCheckHostMonitor&, healthChecker, (), (const));
   MOCK_METHOD(const std::string&, hostnameForHealthChecks, (), (const));
   MOCK_METHOD(const std::string&, hostname, (), (const));
-  MOCK_METHOD(Network::TransportSocketFactory&, transportSocketFactory, (), (const));
+  MOCK_METHOD(Network::UpstreamTransportSocketFactory&, transportSocketFactory, (), (const));
   MOCK_METHOD(HostStats&, stats, (), (const));
+  MOCK_METHOD(LoadMetricStats&, loadMetricStats, (), (const));
   MOCK_METHOD(const envoy::config::core::v3::Locality&, locality, (), (const));
   MOCK_METHOD(uint32_t, priority, (), (const));
   MOCK_METHOD(void, priority, (uint32_t));
@@ -112,9 +114,10 @@ public:
   Network::Address::InstanceConstSharedPtr address_;
   testing::NiceMock<Outlier::MockDetectorHostMonitor> outlier_detector_;
   testing::NiceMock<MockHealthCheckHostMonitor> health_checker_;
-  Network::TransportSocketFactoryPtr socket_factory_;
+  Network::UpstreamTransportSocketFactoryPtr socket_factory_;
   testing::NiceMock<MockClusterInfo> cluster_;
   HostStats stats_;
+  LoadMetricStatsImpl load_metric_stats_;
   envoy::config::core::v3::Locality locality_;
   mutable Stats::TestUtil::TestSymbolTable symbol_table_;
   mutable std::unique_ptr<Stats::StatNameManagedStorage> locality_zone_stat_name_;
@@ -169,6 +172,7 @@ public:
   MOCK_METHOD(MetadataConstSharedPtr, metadata, (), (const));
   MOCK_METHOD(void, metadata, (MetadataConstSharedPtr));
   MOCK_METHOD(const ClusterInfo&, cluster, (), (const));
+  MOCK_METHOD(bool, canCreateConnection, (Upstream::ResourcePriority), (const));
   MOCK_METHOD((std::vector<std::pair<absl::string_view, Stats::PrimitiveCounterReference>>),
               counters, (), (const));
   MOCK_METHOD(MockCreateConnectionData, createConnection_,
@@ -184,11 +188,12 @@ public:
   MOCK_METHOD(Host::Health, health, (), (const));
   MOCK_METHOD(const std::string&, hostnameForHealthChecks, (), (const));
   MOCK_METHOD(const std::string&, hostname, (), (const));
-  MOCK_METHOD(Network::TransportSocketFactory&, transportSocketFactory, (), (const));
+  MOCK_METHOD(Network::UpstreamTransportSocketFactory&, transportSocketFactory, (), (const));
   MOCK_METHOD(Outlier::DetectorHostMonitor&, outlierDetector, (), (const));
   MOCK_METHOD(void, setHealthChecker_, (HealthCheckHostMonitorPtr & health_checker));
   MOCK_METHOD(void, setOutlierDetector_, (Outlier::DetectorHostMonitorPtr & outlier_detector));
   MOCK_METHOD(HostStats&, stats, (), (const));
+  MOCK_METHOD(LoadMetricStats&, loadMetricStats, (), (const));
   MOCK_METHOD(uint32_t, weight, (), (const));
   MOCK_METHOD(void, weight, (uint32_t new_weight));
   MOCK_METHOD(bool, used, (), (const));
@@ -200,9 +205,10 @@ public:
   MOCK_METHOD(MonotonicTime, creationTime, (), (const));
 
   testing::NiceMock<MockClusterInfo> cluster_;
-  Network::TransportSocketFactoryPtr socket_factory_;
+  Network::UpstreamTransportSocketFactoryPtr socket_factory_;
   testing::NiceMock<Outlier::MockDetectorHostMonitor> outlier_detector_;
   HostStats stats_;
+  LoadMetricStatsImpl load_metric_stats_;
   mutable Stats::TestUtil::TestSymbolTable symbol_table_;
   mutable std::unique_ptr<Stats::StatNameManagedStorage> locality_zone_stat_name_;
 };

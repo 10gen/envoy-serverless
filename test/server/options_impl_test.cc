@@ -600,7 +600,6 @@ class TestFactory : public Config::TypedFactory {
 public:
   ~TestFactory() override = default;
   std::string category() const override { return "test"; }
-  std::string configType() override { return "google.protobuf.StringValue"; }
   ProtobufTypes::MessagePtr createEmptyConfigProto() override {
     return std::make_unique<ProtobufWkt::StringValue>();
   }
@@ -615,64 +614,10 @@ class TestingFactory : public Config::TypedFactory {
 public:
   ~TestingFactory() override = default;
   std::string category() const override { return "testing"; }
-  std::string configType() override { return "google.protobuf.StringValue"; }
   ProtobufTypes::MessagePtr createEmptyConfigProto() override {
     return std::make_unique<ProtobufWkt::StringValue>();
   }
 };
-
-class TestTestingFactory : public TestingFactory {
-public:
-  std::string name() const override { return "test"; }
-};
-
-TEST(DisableExtensions, DEPRECATED_FEATURE_TEST(IsDisabled)) {
-  TestTestFactory testTestFactory;
-  Registry::InjectFactoryCategory<TestFactory> testTestCategory(testTestFactory);
-  Registry::InjectFactory<TestFactory> testTestRegistration(testTestFactory, {"test-1", "test-2"});
-
-  TestTestingFactory testTestingFactory;
-  Registry::InjectFactoryCategory<TestingFactory> testTestingCategory(testTestingFactory);
-  Registry::InjectFactory<TestingFactory> testTestingRegistration(testTestingFactory,
-                                                                  {"test-1", "test-2"});
-
-  EXPECT_LOG_CONTAINS("warning", "failed to disable invalid extension name 'not.a.factory'",
-                      OptionsImpl::disableExtensions({"not.a.factory"}));
-
-  EXPECT_LOG_CONTAINS("warning", "failed to disable unknown extension 'no/such.factory'",
-                      OptionsImpl::disableExtensions({"no/such.factory"}));
-
-  EXPECT_NE(Registry::FactoryRegistry<TestFactory>::getFactory("test"), nullptr);
-  EXPECT_EQ(Registry::FactoryRegistry<TestFactory>::getFactory("test-1"), nullptr);
-  EXPECT_EQ(Registry::FactoryRegistry<TestFactory>::getFactory("test-2"), nullptr);
-  EXPECT_NE(Registry::FactoryRegistry<TestFactory>::getFactoryByType("google.protobuf.StringValue"),
-            nullptr);
-
-  EXPECT_NE(Registry::FactoryRegistry<TestingFactory>::getFactory("test"), nullptr);
-  EXPECT_EQ(Registry::FactoryRegistry<TestingFactory>::getFactory("test-1"), nullptr);
-  EXPECT_EQ(Registry::FactoryRegistry<TestingFactory>::getFactory("test-2"), nullptr);
-
-  OptionsImpl::disableExtensions({"test/test", "testing/test-2"});
-
-  // Simulate the initial construction of the type mappings.
-  testTestRegistration.resetTypeMappings();
-  testTestingRegistration.resetTypeMappings();
-
-  // When we disable an extension, all its aliases should also be disabled.
-  EXPECT_EQ(Registry::FactoryRegistry<TestFactory>::getFactory("test"), nullptr);
-  EXPECT_EQ(Registry::FactoryRegistry<TestFactory>::getFactory("test-1"), nullptr);
-  EXPECT_EQ(Registry::FactoryRegistry<TestFactory>::getFactory("test-2"), nullptr);
-
-  // When we disable an extension, all its aliases should also be disabled.
-  EXPECT_EQ(Registry::FactoryRegistry<TestingFactory>::getFactory("test"), nullptr);
-  EXPECT_EQ(Registry::FactoryRegistry<TestingFactory>::getFactory("test-1"), nullptr);
-  EXPECT_EQ(Registry::FactoryRegistry<TestingFactory>::getFactory("test-2"), nullptr);
-
-  // Typing map for TestingFactory should be constructed here after disabling
-  EXPECT_EQ(
-      Registry::FactoryRegistry<TestingFactory>::getFactoryByType("google.protobuf.StringValue"),
-      nullptr);
-}
 
 } // namespace
 } // namespace Envoy

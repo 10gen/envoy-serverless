@@ -73,6 +73,19 @@ public:
 };
 
 /**
+ * Implementation of LoadMetricStats.
+ */
+class LoadMetricStatsImpl : public LoadMetricStats {
+public:
+  void add(const absl::string_view key, double value) override;
+  StatMapPtr latch() override;
+
+private:
+  absl::Mutex mu_;
+  StatMapPtr map_ ABSL_GUARDED_BY(mu_);
+};
+
+/**
  * Implementation of Upstream::HostDescription.
  */
 class HostDescriptionImpl : virtual public HostDescription,
@@ -85,7 +98,7 @@ public:
       const envoy::config::endpoint::v3::Endpoint::HealthCheckConfig& health_check_config,
       uint32_t priority, TimeSource& time_source);
 
-  Network::TransportSocketFactory& transportSocketFactory() const override {
+  Network::UpstreamTransportSocketFactory& transportSocketFactory() const override {
     absl::ReaderMutexLock lock(&metadata_mutex_);
     return socket_factory_;
   }
@@ -123,6 +136,14 @@ public:
         new HealthCheckHostMonitorNullImpl();
     return *null_health_checker;
   }
+
+  bool canCreateConnection(Upstream::ResourcePriority priority) const override {
+    if (stats().cx_active_.value() >= cluster().resourceManager(priority).maxConnectionsPerHost()) {
+      return false;
+    }
+    return cluster().resourceManager(priority).connections().canCreate();
+  }
+
   Outlier::DetectorHostMonitor& outlierDetector() const override {
     if (outlier_detector_) {
       return *outlier_detector_;
@@ -133,6 +154,7 @@ public:
     return *null_outlier_detector;
   }
   HostStats& stats() const override { return stats_; }
+  LoadMetricStats& loadMetricStats() const override { return load_metric_stats_; }
   const std::string& hostnameForHealthChecks() const override { return health_checks_hostname_; }
   const std::string& hostname() const override { return hostname_; }
   Network::Address::InstanceConstSharedPtr address() const override { return address_; }
@@ -148,7 +170,7 @@ public:
   }
   uint32_t priority() const override { return priority_; }
   void priority(uint32_t priority) override { priority_ = priority; }
-  Network::TransportSocketFactory&
+  Network::UpstreamTransportSocketFactory&
   resolveTransportSocketFactory(const Network::Address::InstanceConstSharedPtr& dest_address,
                                 const envoy::config::core::v3::Metadata* metadata) const;
   MonotonicTime creationTime() const override { return creation_time_; }
@@ -185,10 +207,11 @@ private:
   const envoy::config::core::v3::Locality locality_;
   Stats::StatNameDynamicStorage locality_zone_stat_name_;
   mutable HostStats stats_;
+  mutable LoadMetricStatsImpl load_metric_stats_;
   Outlier::DetectorHostMonitorPtr outlier_detector_;
   HealthCheckHostMonitorPtr health_checker_;
   std::atomic<uint32_t> priority_;
-  std::reference_wrapper<Network::TransportSocketFactory>
+  std::reference_wrapper<Network::UpstreamTransportSocketFactory>
       socket_factory_ ABSL_GUARDED_BY(metadata_mutex_);
   const MonotonicTime creation_time_;
 };
@@ -266,13 +289,14 @@ public:
   void used(bool new_used) override { used_ = new_used; }
 
 protected:
-  static Network::ClientConnectionPtr
+  static CreateConnectionData
   createConnection(Event::Dispatcher& dispatcher, const ClusterInfo& cluster,
                    const Network::Address::InstanceConstSharedPtr& address,
                    const std::vector<Network::Address::InstanceConstSharedPtr>& address_list,
-                   Network::TransportSocketFactory& socket_factory,
+                   Network::UpstreamTransportSocketFactory& socket_factory,
                    const Network::ConnectionSocket::OptionsSharedPtr& options,
-                   Network::TransportSocketOptionsConstSharedPtr transport_socket_options);
+                   Network::TransportSocketOptionsConstSharedPtr transport_socket_options,
+                   HostDescriptionConstSharedPtr host);
 
 private:
   void setEdsHealthFlag(envoy::config::core::v3::HealthStatus health_status);
@@ -583,7 +607,7 @@ public:
       Envoy::Extensions::Upstreams::Http::ProtocolOptionsConfigImpl;
   ClusterInfoImpl(const envoy::config::cluster::v3::Cluster& config,
                   const envoy::config::core::v3::BindConfig& bind_config, Runtime::Loader& runtime,
-                  TransportSocketMatcherPtr&& socket_matcher, Stats::ScopePtr&& stats_scope,
+                  TransportSocketMatcherPtr&& socket_matcher, Stats::ScopeSharedPtr&& stats_scope,
                   bool added_via_api, Server::Configuration::TransportSocketFactoryContext&);
 
   static ClusterStats generateStats(Stats::Scope& scope,
@@ -781,7 +805,7 @@ private:
   const float peekahead_ratio_;
   const uint32_t per_connection_buffer_limit_bytes_;
   TransportSocketMatcherPtr socket_matcher_;
-  Stats::ScopePtr stats_scope_;
+  Stats::ScopeSharedPtr stats_scope_;
   mutable ClusterStats stats_;
   Stats::IsolatedStoreImpl load_report_stats_store_;
   mutable ClusterLoadReportStats load_report_stats_;
@@ -822,11 +846,11 @@ private:
 };
 
 /**
- * Function that creates a Network::TransportSocketFactoryPtr
+ * Function that creates a Network::UpstreamTransportSocketFactoryPtr
  * given a cluster configuration and transport socket factory
  * context.
  */
-Network::TransportSocketFactoryPtr
+Network::UpstreamTransportSocketFactoryPtr
 createTransportSocketFactory(const envoy::config::cluster::v3::Cluster& config,
                              Server::Configuration::TransportSocketFactoryContext& factory_context);
 
@@ -894,7 +918,7 @@ public:
 protected:
   ClusterImplBase(const envoy::config::cluster::v3::Cluster& cluster, Runtime::Loader& runtime,
                   Server::Configuration::TransportSocketFactoryContextImpl& factory_context,
-                  Stats::ScopePtr&& stats_scope, bool added_via_api, TimeSource& time_source);
+                  Stats::ScopeSharedPtr&& stats_scope, bool added_via_api, TimeSource& time_source);
 
   /**
    * Overridden by every concrete cluster. The cluster should do whatever pre-init is needed. E.g.,
@@ -1036,8 +1060,6 @@ protected:
  */
 Network::DnsLookupFamily
 getDnsLookupFamilyFromCluster(const envoy::config::cluster::v3::Cluster& cluster);
-Network::DnsLookupFamily
-getDnsLookupFamilyFromEnum(envoy::config::cluster::v3::Cluster::DnsLookupFamily family);
 
 /**
  * Utility function to report upstream cx destroy metrics
@@ -1050,6 +1072,13 @@ void reportUpstreamCxDestroy(const Upstream::HostDescriptionConstSharedPtr& host
  */
 void reportUpstreamCxDestroyActiveRequest(const Upstream::HostDescriptionConstSharedPtr& host,
                                           Network::ConnectionEvent event);
+
+/**
+ * Utility function to combine the given socket options with the socket options in cluster.
+ */
+Network::ConnectionSocket::OptionsSharedPtr
+combineConnectionSocketOptions(const ClusterInfo& cluster,
+                               const Network::ConnectionSocket::OptionsSharedPtr& options);
 
 } // namespace Upstream
 } // namespace Envoy

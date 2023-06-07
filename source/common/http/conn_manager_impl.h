@@ -285,10 +285,6 @@ private:
     Tracing::Config& tracingConfig() override;
     const ScopeTrackedObject& scope() override;
 
-    bool enableInternalRedirectsWithBody() const override {
-      return connection_manager_.enable_internal_redirects_with_body_;
-    }
-
     void traceRequest();
 
     // Updates the snapped_route_config_ (by reselecting scoped route configuration), if a scope is
@@ -307,7 +303,8 @@ private:
     struct State {
       State()
           : codec_saw_local_complete_(false), saw_connection_close_(false),
-            successful_upgrade_(false), is_internally_created_(false), decorated_propagate_(true) {}
+            successful_upgrade_(false), is_internally_created_(false), is_tunneling_(false),
+            decorated_propagate_(true) {}
 
       bool codec_saw_local_complete_ : 1; // This indicates that local is complete as written all
                                           // the way through to the codec.
@@ -317,6 +314,10 @@ private:
       // True if this stream is internally created. Currently only used for
       // internal redirects or other streams created via recreateStream().
       bool is_internally_created_ : 1;
+
+      // True if the response headers indicate a successful upgrade or connect
+      // response.
+      bool is_tunneling_ : 1;
 
       bool decorated_propagate_ : 1;
     };
@@ -397,7 +398,7 @@ private:
    * Check to see if the connection can be closed after gracefully waiting to send pending codec
    * data.
    */
-  void checkForDeferredClose();
+  void checkForDeferredClose(bool skip_deferred_close);
 
   /**
    * Do a delayed destruction of a stream to allow for stack unwind. Also calls onDestroy() for
@@ -454,12 +455,12 @@ private:
   const Server::OverloadActionState& overload_disable_keepalive_ref_;
   TimeSource& time_source_;
   bool remote_close_{};
-  bool enable_internal_redirects_with_body_{};
   // Hop by hop headers should always be cleared for Envoy-as-a-proxy but will
   // not be for Envoy-mobile.
   bool clear_hop_by_hop_response_headers_{true};
   // The number of requests accumulated on the current connection.
   uint64_t accumulated_requests_{};
+  const std::string proxy_name_; // for Proxy-Status.
 };
 
 } // namespace Http

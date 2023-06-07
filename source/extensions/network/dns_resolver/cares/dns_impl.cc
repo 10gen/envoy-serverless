@@ -16,6 +16,7 @@
 #include "source/common/network/address_impl.h"
 #include "source/common/network/resolver_impl.h"
 #include "source/common/network/utility.h"
+#include "source/common/runtime/runtime_features.h"
 
 #include "absl/strings/str_join.h"
 #include "ares.h"
@@ -123,15 +124,30 @@ void DnsResolverImpl::initializeChannel(ares_options* options, int optmask) {
   }
 }
 
+// Treat responses with `ARES_ENODATA` or `ARES_ENOTFOUND` status as DNS response with no records.
+// @see DnsResolverImpl::PendingResolution::onAresGetAddrInfoCallback for details.
+bool DnsResolverImpl::AddrInfoPendingResolution::isResponseWithNoRecords(int status) {
+  return accept_nodata_ && (status == ARES_ENODATA || status == ARES_ENOTFOUND);
+}
+
 void DnsResolverImpl::AddrInfoPendingResolution::onAresGetAddrInfoCallback(
     int status, int timeouts, ares_addrinfo* addrinfo) {
-  if (status != ARES_SUCCESS) {
+  ASSERT(pending_resolutions_ > 0);
+  pending_resolutions_--;
+
+  if (status != ARES_SUCCESS && !isResponseWithNoRecords(status)) {
     ENVOY_LOG_EVENT(debug, "cares_resolution_failure",
                     "dns resolution for {} failed with c-ares status {}", dns_name_, status);
   }
 
   // We receive ARES_EDESTRUCTION when destructing with pending queries.
   if (status == ARES_EDESTRUCTION) {
+    // In the destruction path we must wait until there are no more pending queries. Resolution is
+    // not truly finished until the last parallel query has been destroyed.
+    if (pending_resolutions_ > 0) {
+      return;
+    }
+
     ASSERT(owned_);
     // This destruction might have been triggered by a peer PendingResolution that received a
     // ARES_ECONNREFUSED. If the PendingResolution has not been cancelled that means that the
@@ -167,8 +183,13 @@ void DnsResolverImpl::AddrInfoPendingResolution::onAresGetAddrInfoCallback(
     pending_response_.status_ = ResolutionStatus::Success;
 
     if (addrinfo != nullptr && addrinfo->nodes != nullptr) {
-      if (addrinfo->nodes->ai_family == AF_INET) {
-        for (const ares_addrinfo_node* ai = addrinfo->nodes; ai != nullptr; ai = ai->ai_next) {
+      bool can_process_v4 =
+          (!parent_.filter_unroutable_families_ || available_interfaces_.v4_available_);
+      bool can_process_v6 =
+          (!parent_.filter_unroutable_families_ || available_interfaces_.v6_available_);
+
+      for (const ares_addrinfo_node* ai = addrinfo->nodes; ai != nullptr; ai = ai->ai_next) {
+        if (ai->ai_family == AF_INET && can_process_v4) {
           sockaddr_in address;
           memset(&address, 0, sizeof(address));
           address.sin_family = AF_INET;
@@ -178,9 +199,7 @@ void DnsResolverImpl::AddrInfoPendingResolution::onAresGetAddrInfoCallback(
           pending_response_.address_list_.emplace_back(
               DnsResponse(std::make_shared<const Address::Ipv4Instance>(&address),
                           std::chrono::seconds(ai->ai_ttl)));
-        }
-      } else if (addrinfo->nodes->ai_family == AF_INET6) {
-        for (const ares_addrinfo_node* ai = addrinfo->nodes; ai != nullptr; ai = ai->ai_next) {
+        } else if (ai->ai_family == AF_INET6 && can_process_v6) {
           sockaddr_in6 address;
           memset(&address, 0, sizeof(address));
           address.sin6_family = AF_INET6;
@@ -199,6 +218,11 @@ void DnsResolverImpl::AddrInfoPendingResolution::onAresGetAddrInfoCallback(
 
     ASSERT(addrinfo != nullptr);
     ares_freeaddrinfo(addrinfo);
+  } else if (isResponseWithNoRecords(status)) {
+    // Treat `ARES_ENODATA` or `ARES_ENOTFOUND` here as success to populate back the
+    // "empty records" response.
+    pending_response_.status_ = ResolutionStatus::Success;
+    ASSERT(addrinfo == nullptr);
   }
 
   if (timeouts > 0) {
@@ -219,8 +243,10 @@ void DnsResolverImpl::AddrInfoPendingResolution::onAresGetAddrInfoCallback(
     // that the first lookup failed to return any addresses. Note that DnsLookupFamily::All issues
     // both lookups concurrently so there is no need to fire a second lookup here.
     if (dns_lookup_family_ == DnsLookupFamily::Auto) {
+      family_ = AF_INET;
       startResolutionImpl(AF_INET);
     } else if (dns_lookup_family_ == DnsLookupFamily::V4Preferred) {
+      family_ = AF_INET6;
       startResolutionImpl(AF_INET6);
     }
 
@@ -233,7 +259,7 @@ void DnsResolverImpl::AddrInfoPendingResolution::onAresGetAddrInfoCallback(
 void DnsResolverImpl::PendingResolution::finishResolve() {
   ENVOY_LOG_EVENT(debug, "cares_dns_resolution_complete",
                   "dns resolution for {} completed with status {}", dns_name_,
-                  pending_response_.status_);
+                  static_cast<int>(pending_response_.status_));
 
   if (!cancelled_) {
     // Use a raw try here because it is used in both main thread and filter.
@@ -260,7 +286,7 @@ void DnsResolverImpl::PendingResolution::finishResolve() {
   } else {
     ENVOY_LOG_EVENT(debug, "cares_dns_callback_cancelled",
                     "dns resolution callback for {} not issued. Cancelled with reason={}",
-                    dns_name_, cancel_reason_);
+                    dns_name_, static_cast<int>(cancel_reason_));
   }
   if (owned_) {
     delete this;
@@ -348,10 +374,11 @@ DnsResolverImpl::AddrInfoPendingResolution::AddrInfoPendingResolution(
     DnsResolverImpl& parent, ResolveCb callback, Event::Dispatcher& dispatcher,
     ares_channel channel, const std::string& dns_name, DnsLookupFamily dns_lookup_family)
     : PendingResolution(parent, callback, dispatcher, channel, dns_name),
-      dns_lookup_family_(dns_lookup_family), available_interfaces_(availableInterfaces()) {
+      dns_lookup_family_(dns_lookup_family), available_interfaces_(availableInterfaces()),
+      accept_nodata_(
+          Runtime::runtimeFeatureEnabled("envoy.reloadable_features.cares_accept_nodata")) {
   if (dns_lookup_family == DnsLookupFamily::Auto ||
-      dns_lookup_family == DnsLookupFamily::V4Preferred ||
-      dns_lookup_family == DnsLookupFamily::All) {
+      dns_lookup_family == DnsLookupFamily::V4Preferred) {
     dual_resolution_ = true;
   }
 
@@ -364,27 +391,22 @@ DnsResolverImpl::AddrInfoPendingResolution::AddrInfoPendingResolution(
   case DnsLookupFamily::Auto:
     family_ = AF_INET6;
     break;
-  // NOTE: DnsLookupFamily::All performs both lookups concurrently as addresses from both families
-  // are being requested.
   case DnsLookupFamily::All:
-    lookup_all_ = true;
+    family_ = AF_UNSPEC;
     break;
-  default:
-    NOT_REACHED_GCOVR_EXCL_LINE;
   }
 }
 
-void DnsResolverImpl::AddrInfoPendingResolution::startResolution() {
-  if (lookup_all_) {
-    startResolutionImpl(AF_INET);
-    startResolutionImpl(AF_INET6);
-  } else {
-    startResolutionImpl(family_);
-  }
+DnsResolverImpl::AddrInfoPendingResolution::~AddrInfoPendingResolution() {
+  // All pending resolutions should be cleaned up at this point.
+  ASSERT(pending_resolutions_ == 0);
 }
+
+void DnsResolverImpl::AddrInfoPendingResolution::startResolution() { startResolutionImpl(family_); }
 
 void DnsResolverImpl::AddrInfoPendingResolution::startResolutionImpl(int family) {
-  if (parent_.filter_unroutable_families_) {
+  pending_resolutions_++;
+  if (parent_.filter_unroutable_families_ && family != AF_UNSPEC) {
     switch (family) {
     case AF_INET:
       if (!available_interfaces_.v4_available_) {
@@ -432,7 +454,14 @@ DnsResolverImpl::AddrInfoPendingResolution::availableInterfaces() {
 
   Api::InterfaceAddressVector interface_addresses{};
   const Api::SysCallIntResult rc = Api::OsSysCallsSingleton::get().getifaddrs(interface_addresses);
-  RELEASE_ASSERT(!rc.return_value_, fmt::format("getiffaddrs error: {}", rc.errno_));
+  if (rc.return_value_ != 0) {
+    ENVOY_LOG_EVENT(debug, "cares_getiffaddrs_error",
+                    "dns resolution for {} could not obtain interface information with error={}",
+                    dns_name_, rc.errno_);
+    // Maintain no-op behavior if the system encountered an error while providing interface
+    // information.
+    return {true, true};
+  }
 
   DnsResolverImpl::AddrInfoPendingResolution::AvailableInterfaces available_interfaces{false,
                                                                                        false};
@@ -458,15 +487,14 @@ DnsResolverImpl::AddrInfoPendingResolution::availableInterfaces() {
         return available_interfaces;
       }
       break;
-    default:
-      NOT_REACHED_GCOVR_EXCL_LINE;
     }
   }
   return available_interfaces;
 }
 
 // c-ares DNS resolver factory
-class CaresDnsResolverFactory : public DnsResolverFactory {
+class CaresDnsResolverFactory : public DnsResolverFactory,
+                                public Logger::Loggable<Logger::Id::dns> {
 public:
   std::string name() const override { return std::string(CaresDnsResolver); }
 
@@ -494,6 +522,29 @@ public:
     }
     return std::make_shared<Network::DnsResolverImpl>(cares, dispatcher, resolvers);
   }
+
+  void initialize() override {
+    // Initialize c-ares library in case first time.
+    absl::MutexLock lock(&mutex_);
+    if (!ares_library_initialized_) {
+      ares_library_initialized_ = true;
+      ENVOY_LOG(info, "c-ares library initialized.");
+      ares_library_init(ARES_LIB_INIT_ALL);
+    }
+  }
+  void terminate() override {
+    // Cleanup c-ares library if initialized.
+    absl::MutexLock lock(&mutex_);
+    if (ares_library_initialized_) {
+      ares_library_initialized_ = false;
+      ENVOY_LOG(info, "c-ares library cleaned up.");
+      ares_library_cleanup();
+    }
+  }
+
+private:
+  bool ares_library_initialized_ ABSL_GUARDED_BY(mutex_){false};
+  absl::Mutex mutex_;
 };
 
 // Register the CaresDnsResolverFactory

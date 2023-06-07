@@ -293,7 +293,6 @@ void HttpHealthCheckerImpl::HttpActiveHealthCheckSession::onInterval() {
       *request_headers,
       // Here there is no downstream connection so scheme will be based on
       // upstream crypto
-      host_->transportSocketFactory().implementsSecureTransport(),
       host_->transportSocketFactory().implementsSecureTransport());
   StreamInfo::StreamInfoImpl stream_info(protocol_, parent_.dispatcher_.timeSource(),
                                          local_connection_info_provider_);
@@ -324,14 +323,7 @@ void HttpHealthCheckerImpl::HttpActiveHealthCheckSession::onResetStream(Http::St
 void HttpHealthCheckerImpl::HttpActiveHealthCheckSession::onGoAway(
     Http::GoAwayErrorCode error_code) {
   ENVOY_CONN_LOG(debug, "connection going away goaway_code={}, health_flags={}", *client_,
-                 error_code, HostUtility::healthFlagsToString(*host_));
-
-  // Runtime guard around graceful handling of NO_ERROR GOAWAY handling. The old behavior is to
-  // ignore GOAWAY completely.
-  if (!parent_.runtime_.snapshot().runtimeFeatureEnabled(
-          "envoy.reloadable_features.health_check.graceful_goaway_handling")) {
-    return;
-  }
+                 static_cast<int>(error_code), HostUtility::healthFlagsToString(*host_));
 
   if (request_in_flight_ && error_code == Http::GoAwayErrorCode::NoError) {
     // The server is starting a graceful shutdown. Allow the in flight request
@@ -464,7 +456,8 @@ HttpHealthCheckerImpl::codecClientType(const envoy::type::v3::CodecClientType& t
 Http::CodecClient*
 ProdHttpHealthCheckerImpl::createCodecClient(Upstream::Host::CreateConnectionData& data) {
   return new Http::CodecClientProd(codec_client_type_, std::move(data.connection_),
-                                   data.host_description_, dispatcher_, random_generator_);
+                                   data.host_description_, dispatcher_, random_generator_,
+                                   transportSocketOptions());
 }
 
 TcpHealthCheckMatcher::MatchSegments TcpHealthCheckMatcher::loadProtoBytes(
@@ -609,7 +602,9 @@ GrpcHealthCheckerImpl::GrpcHealthCheckerImpl(const Cluster& cluster,
     : HealthCheckerImplBase(cluster, config, dispatcher, runtime, random, std::move(event_logger)),
       random_generator_(random),
       service_method_(*Protobuf::DescriptorPool::generated_pool()->FindMethodByName(
-          "grpc.health.v1.Health.Check")) {
+          "grpc.health.v1.Health.Check")),
+      request_headers_parser_(
+          Router::HeaderParser::configure(config.grpc_health_check().initial_metadata())) {
   if (!config.grpc_health_check().service_name().empty()) {
     service_name_ = config.grpc_health_check().service_name();
   }
@@ -621,7 +616,10 @@ GrpcHealthCheckerImpl::GrpcHealthCheckerImpl(const Cluster& cluster,
 
 GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::GrpcActiveHealthCheckSession(
     GrpcHealthCheckerImpl& parent, const HostSharedPtr& host)
-    : ActiveHealthCheckSession(parent, host), parent_(parent) {}
+    : ActiveHealthCheckSession(parent, host), parent_(parent),
+      local_connection_info_provider_(std::make_shared<Network::ConnectionInfoSetterImpl>(
+          Network::Utility::getCanonicalIpv4LoopbackAddress(),
+          Network::Utility::getCanonicalIpv4LoopbackAddress())) {}
 
 GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::~GrpcActiveHealthCheckSession() {
   ASSERT(client_ == nullptr);
@@ -746,13 +744,18 @@ void GrpcHealthCheckerImpl::GrpcActiveHealthCheckSession::onInterval() {
   headers_message->headers().setReferenceUserAgent(
       Http::Headers::get().UserAgentValues.EnvoyHealthChecker);
 
+  StreamInfo::StreamInfoImpl stream_info(Http::Protocol::Http2, parent_.dispatcher_.timeSource(),
+                                         local_connection_info_provider_);
+  stream_info.setUpstreamInfo(std::make_shared<StreamInfo::UpstreamInfoImpl>());
+  stream_info.upstreamInfo()->setUpstreamHost(host_);
+  parent_.request_headers_parser_->evaluateHeaders(headers_message->headers(), stream_info);
+
   Grpc::Common::toGrpcTimeout(parent_.timeout_, headers_message->headers());
 
   Router::FilterUtility::setUpstreamScheme(
       headers_message->headers(),
       // Here there is no downstream connection so scheme will be based on
       // upstream crypto
-      host_->transportSocketFactory().implementsSecureTransport(),
       host_->transportSocketFactory().implementsSecureTransport());
 
   auto status = request_encoder_->encodeHeaders(headers_message->headers(), false);
@@ -930,7 +933,7 @@ Http::CodecClientPtr
 ProdGrpcHealthCheckerImpl::createCodecClient(Upstream::Host::CreateConnectionData& data) {
   return std::make_unique<Http::CodecClientProd>(
       Http::CodecType::HTTP2, std::move(data.connection_), data.host_description_, dispatcher_,
-      random_generator_);
+      random_generator_, transportSocketOptions());
 }
 
 std::ostream& operator<<(std::ostream& out, HealthState state) {

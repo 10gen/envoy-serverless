@@ -14,7 +14,7 @@
 #include "envoy/ssl/ssl_socket_extended_info.h"
 
 #include "source/common/common/matchers.h"
-#include "source/common/stats/symbol_table_impl.h"
+#include "source/common/stats/symbol_table.h"
 #include "source/extensions/transport_sockets/tls/stats.h"
 
 #include "openssl/ssl.h"
@@ -45,10 +45,9 @@ public:
    * @param leaf_cert the peer certificate to verify
    * @return 1 to indicate verification success and 0 to indicate verification failure.
    */
-  virtual int
-  doVerifyCertChain(X509_STORE_CTX* store_ctx, Ssl::SslExtendedSocketInfo* ssl_extended_info,
-                    X509& leaf_cert,
-                    const Network::TransportSocketOptions* transport_socket_options) PURE;
+  virtual int doSynchronousVerifyCertChain(
+      X509_STORE_CTX* store_ctx, Ssl::SslExtendedSocketInfo* ssl_extended_info, X509& leaf_cert,
+      const Network::TransportSocketOptions* transport_socket_options) PURE;
 
   /**
    * Called to initialize all ssl contexts
@@ -75,7 +74,7 @@ public:
                                         uint8_t hash_buffer[EVP_MAX_MD_SIZE],
                                         unsigned hash_length) PURE;
 
-  virtual size_t daysUntilFirstCertExpires() const PURE;
+  virtual absl::optional<uint32_t> daysUntilFirstCertExpires() const PURE;
   virtual std::string getCaFileName() const PURE;
   virtual Envoy::Ssl::CertificateDetailsPtr getCaCertInformation() const PURE;
 };
