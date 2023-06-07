@@ -263,6 +263,7 @@ proto_library(
         "//envoy/extensions/transport_sockets/s2a/v3:pkg",
         "//envoy/extensions/transport_sockets/starttls/v3:pkg",
         "//envoy/extensions/transport_sockets/tap/v3:pkg",
+        "//envoy/extensions/transport_sockets/tcp_stats/v3:pkg",
         "//envoy/extensions/transport_sockets/tls/v3:pkg",
         "//envoy/extensions/udp_packet_writer/v3:pkg",
         "//envoy/extensions/upstreams/http/generic/v3:pkg",

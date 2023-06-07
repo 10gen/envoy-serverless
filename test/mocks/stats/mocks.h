@@ -329,6 +329,7 @@ public:
 
   TestUtil::TestSymbolTable symbol_table_;
   testing::NiceMock<MockCounter> counter_;
+  testing::NiceMock<MockGauge> gauge_;
   std::vector<std::unique_ptr<MockHistogram>> histograms_;
 };
 
