@@ -56,6 +56,9 @@ build --incompatible_enforce_config_setting_visibility
 
 test --test_verbose_timeout_warnings
 
+# The TCP/IP implementation in CentOS 7 doesn't support RFC4898: TCP Extended Statistics MIB, which leads to compilation failures.
+build --//source/extensions/transport_sockets/tcp_stats:enabled=false
+
 # Allow tags to influence execution requirements
 common --experimental_allow_tags_propagation
 
