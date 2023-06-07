@@ -1,0 +1,31 @@
+# This build environment follows the one maintained by SRE team in the Envoy RPM spec:
+# https://github.com/xgen-cloud/rpm-spec/blob/master/build/envoy/SPECS/envoy.spec
+FROM centos:7
+
+RUN yum install -y epel-release
+RUN yum groupinstall -y 'Development Tools'
+RUN yum install -y clang python3
+
+# Pre-pack mongodb toolchain into centos7 image
+RUN curl -L -o mongodbtoolchain.tar.gz -L http://mongodbtoolchain.build.10gen.cc/toolchain/rhel70/x86_64/latest && \
+   mkdir -p /opt/mongodbtoolchain/revisions && \
+   REVISION=$(tar --list -f mongodbtoolchain.tar.gz | head -1 | sed 's/\/$//') && \
+   tar -C /opt/mongodbtoolchain/revisions -xzvf mongodbtoolchain.tar.gz $REVISION && \
+   /opt/mongodbtoolchain/revisions/$REVISION/scripts/install.sh && \
+   rm mongodbtoolchain.tar.gz
+
+RUN yum install -y python3-pip pprof
+RUN yum install -y aspell-en libatomic libstdc++ libtool ninja-build which
+
+# Install cmake via pip
+RUN python3 -m pip install -I cmake==3.22.5 --no-deps
+
+# To build v8, gn is required, but a different version of glibc is expected. Use the version built by SRE team.
+RUN yum install -y rpm cpio
+ARG GN_SRE=https://xgen-sre-rpms.s3.amazonaws.com/RPMS/7/x86_64/gn-0.01-188.el7.x86_64.rpm
+RUN curl -L ${GN_SRE} | rpm2cpio | cpio -i --to-stdout './usr/bin/gn' > /usr/local/bin/gn && chmod +x /usr/local/bin/gn
+
+# Install bazel
+ARG BAZEL_URL="https://github.com/bazelbuild/bazelisk/releases/download/v1.9.0/bazelisk-linux-amd64"
+RUN curl -L -o /usr/local/bin/bazel ${BAZEL_URL} && chmod +x /usr/local/bin/bazel
+
