@@ -44,3 +44,11 @@ echo "STABLE_BUILD_SCM_STATUS ${tree_status}"
 # Generate a build version number to label built binaries in the format specified in evergreen scripts
 git_version_number=$(git describe --tags --dirty --always --match 'v[0-9]*' --abbrev=7 | cut -c 2-)
 echo "GIT_VERSION_NUMBER ${git_version_number}"
+
+git_branch=$(git rev-parse --abbrev-ref HEAD)
+echo "BUILD_SCM_BRANCH ${git_branch}"
+
+git_remote=$(git remote get-url origin)
+if [[ -n "$git_remote" ]]; then
+    echo "BUILD_SCM_REMOTE ${git_remote}"
+fi

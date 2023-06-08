@@ -56,6 +56,7 @@ EXTENSIONS = {
     #
 
     "envoy.health_checkers.redis":                      "//source/extensions/health_checkers/redis:config",
+    "envoy.health_checkers.thrift":                     "//source/extensions/health_checkers/thrift:config",
 
     #
     # Input Matchers
@@ -192,7 +193,6 @@ EXTENSIONS = {
     #
 
     "envoy.tracers.dynamic_ot":                         "//source/extensions/tracers/dynamic_ot:config",
-    "envoy.tracers.lightstep":                          "//source/extensions/tracers/lightstep:config",
     "envoy.tracers.datadog":                            "//source/extensions/tracers/datadog:config",
     "envoy.tracers.zipkin":                             "//source/extensions/tracers/zipkin:config",
     "envoy.tracers.opencensus":                         "//source/extensions/tracers/opencensus:config",
@@ -300,6 +300,7 @@ EXTENSIONS = {
     #
 
     "envoy.http.stateful_session.cookie":                "//source/extensions/http/stateful_session/cookie:config",
+    "envoy.http.stateful_session.header":                "//source/extensions/http/stateful_session/header:config",
 
     #
     # QUIC extensions
@@ -356,6 +357,11 @@ EXTENSIONS = {
 
     "envoy.http.header_validators.envoy_default":        "//source/extensions/http/header_validators/envoy_default:config",
 
+    #
+    # Path Pattern Match and Path Pattern Rewrite
+    #
+    "envoy.path.match.uri_template.uri_template_matcher": "//source/extensions/path/match/uri_template:config",
+    "envoy.path.rewrite.uri_template.uri_template_rewriter": "//source/extensions/path/rewrite/uri_template:config",
     #
     # Early Data option
     #
