@@ -130,12 +130,17 @@ ReadOrParseState Filter::parseBuffer(Network::ListenerFilterBuffer& buffer) {
       !cb_->filterState().hasData<Network::ProxyProtocolFilterState>(
           Network::ProxyProtocolFilterState::key())) {
     if (!proxy_protocol_header_.value().local_command_) {
-      ENVOY_LOG(trace,
-                fmt::format("parsed proxy protocol header, length: {}, buffer: {}, "
-                            "TLV length: {}, TLV buffer: {}",
-                            buf_off_,
-                            Envoy::Hex::encode(reinterpret_cast<uint8_t*>(&buf_), buf_off_),
-                            buf_tlv_off_, Envoy::Hex::encode(buf_tlv_.data(), buf_tlv_off_)));
+      auto buf = reinterpret_cast<const uint8_t*>(buffer.rawSlice().mem_);
+      ENVOY_LOG(
+          trace,
+          fmt::format("parsed proxy protocol header, length: {}, buffer: {}, "
+                      "TLV length: {}, TLV buffer: {}",
+                      proxy_protocol_header_.value().wholeHeaderLength(),
+                      Envoy::Hex::encode(buf, proxy_protocol_header_.value().wholeHeaderLength()),
+                      proxy_protocol_header_.value().extensions_length_,
+                      Envoy::Hex::encode(
+                          buf + proxy_protocol_header_.value().headerLengthWithoutExtension(),
+                          proxy_protocol_header_.value().extensions_length_)));
     }
     cb_->filterState().setData(
         Network::ProxyProtocolFilterState::key(),
@@ -386,7 +391,7 @@ bool Filter::parseTlvs(const uint8_t* buf, size_t len) {
     }
 
     // Only save to dynamic metadata if this type of TLV is needed.
-    absl::string_view tlv_value(reinterpret_cast<char const*>(tlvs.data() + idx), tlv_value_length);
+    absl::string_view tlv_value(reinterpret_cast<char const*>(buf + idx), tlv_value_length);
     auto key_value_pair = config_->isTlvTypeNeeded(tlv_type);
     if (nullptr != key_value_pair) {
       ProtobufWkt::Value metadata_value;
@@ -419,27 +424,16 @@ bool Filter::parseTlvs(const uint8_t* buf, size_t len) {
   return true;
 }
 
-ReadOrParseState Filter::readExtensions(Network::IoHandle& io_handle) {
+ReadOrParseState Filter::readExtensions(Network::ListenerFilterBuffer& buffer) {
   auto raw_slice = buffer.rawSlice();
   // waiting for more data if there is no enough data for extensions.
   if (raw_slice.len_ < (proxy_protocol_header_.value().wholeHeaderLength())) {
     return ReadOrParseState::TryAgainLater;
   }
-  
-  // Parse and discard the extensions if this is a local command.
+
   if (proxy_protocol_header_.value().local_command_) {
-    // buf_ is no longer in use so we re-use it to read/discard.
-    return parseExtensions(io_handle, reinterpret_cast<uint8_t*>(buf_), sizeof(buf_), nullptr);
-  }
-
-  // Initialize the buf_tlv_ only when we need to read the TLVs.
-  if (buf_tlv_.empty()) {
-    buf_tlv_.resize(proxy_protocol_header_.value().extensions_length_);
-ReadOrParseState Filter::readExtensions(Network::ListenerFilterBuffer& buffer) {
-
-  if (proxy_protocol_header_.value().local_command_ || 0 == config_->numberOfNeededTlvTypes()) {
-    // Ignores the extensions if this is a local command or there's no TLV needs to be saved
-    // to metadata. Those will drained from the buffer in the end.
+    // Ignores the extensions if this is a local command. Those will drained from
+    // the buffer in the end.
     return ReadOrParseState::Done;
   }
 
