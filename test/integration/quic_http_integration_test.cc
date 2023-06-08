@@ -189,7 +189,8 @@ public:
         // Use smaller window than the default one to have test coverage of client codec buffer
         // exceeding high watermark.
         /*send_buffer_limit=*/2 * Http2::Utility::OptionsLimits::MIN_INITIAL_STREAM_WINDOW_SIZE,
-        persistent_info.crypto_stream_factory_, quic_stat_names_, cache, stats_store_, nullptr);
+        persistent_info.crypto_stream_factory_, quic_stat_names_, cache, *stats_store_.rootScope(),
+        nullptr);
     return session;
   }
 
@@ -260,7 +261,7 @@ public:
     ssl_client_option_.setAlpn(true).setSan(san_to_match_).setSni("lyft.com");
     NiceMock<Server::Configuration::MockTransportSocketFactoryContext> context;
     ON_CALL(context, api()).WillByDefault(testing::ReturnRef(*api_));
-    ON_CALL(context, scope()).WillByDefault(testing::ReturnRef(stats_store_));
+    ON_CALL(context, scope()).WillByDefault(testing::ReturnRef(stats_scope_));
     ON_CALL(context, sslContextManager()).WillByDefault(testing::ReturnRef(context_manager_));
     envoy::extensions::transport_sockets::quic::v3::QuicUpstreamTransport
         quic_transport_socket_config;
@@ -494,7 +495,21 @@ INSTANTIATE_TEST_SUITE_P(QuicHttpMultiAddressesIntegrationTest,
                          TestUtility::ipTestParamsToString);
 
 TEST_P(QuicHttpIntegrationTest, GetRequestAndEmptyResponse) {
+  useAccessLog("%DOWNSTREAM_TLS_VERSION% %DOWNSTREAM_TLS_CIPHER% %DOWNSTREAM_TLS_SESSION_ID%");
   testRouterHeaderOnlyRequestAndResponse();
+  std::string log = waitForAccessLog(access_log_name_);
+  EXPECT_THAT(log, testing::MatchesRegex("TLSv1.3 TLS_(AES_128_GCM|CHACHA20_POLY1305)_SHA256 -"));
+}
+
+TEST_P(QuicHttpIntegrationTest, GetPeerAndLocalCertsInfo) {
+  // These are not implemented yet, but configuring them shouldn't cause crash.
+  useAccessLog("%DOWNSTREAM_PEER_CERT% %DOWNSTREAM_PEER_ISSUER% %DOWNSTREAM_PEER_SERIAL% "
+               "%DOWNSTREAM_PEER_FINGERPRINT_1% %DOWNSTREAM_PEER_FINGERPRINT_256% "
+               "%DOWNSTREAM_LOCAL_SUBJECT% %DOWNSTREAM_PEER_SUBJECT% %DOWNSTREAM_LOCAL_URI_SAN% "
+               "%DOWNSTREAM_PEER_URI_SAN%");
+  testRouterHeaderOnlyRequestAndResponse();
+  std::string log = waitForAccessLog(access_log_name_);
+  EXPECT_EQ("- - - - - - - - -", log);
 }
 
 TEST_P(QuicHttpIntegrationTest, Draft29NotSupportedByDefault) {
@@ -745,47 +760,6 @@ TEST_P(QuicHttpIntegrationTest, PortMigration) {
   quic_connection_->switchConnectionSocket(
       createConnectionSocket(server_addr_, local_addr, options));
   EXPECT_TRUE(codec_client_->disconnected());
-  cleanupUpstreamAndDownstream();
-}
-
-TEST_P(QuicHttpIntegrationTest, PortMigrationNoConnectionIdGenerator) {
-  SetQuicReloadableFlag(quic_connection_uses_abstract_connection_id_generator, false);
-  setConcurrency(2);
-  initialize();
-  uint32_t old_port = lookupPort("http");
-  codec_client_ = makeHttpConnection(old_port);
-  auto encoder_decoder =
-      codec_client_->startRequest(Http::TestRequestHeaderMapImpl{{":method", "POST"},
-                                                                 {":path", "/test/long/url"},
-                                                                 {":scheme", "http"},
-                                                                 {":authority", "host"}});
-  request_encoder_ = &encoder_decoder.first;
-  auto response = std::move(encoder_decoder.second);
-
-  codec_client_->sendData(*request_encoder_, 1024u, false);
-  while (!quic_connection_->IsHandshakeConfirmed()) {
-    dispatcher_->run(Event::Dispatcher::RunType::NonBlock);
-  }
-
-  // Change to a new port by switching socket, and connection should still continue.
-  Network::Address::InstanceConstSharedPtr local_addr =
-      Network::Test::getCanonicalLoopbackAddress(version_);
-  quic_connection_->switchConnectionSocket(
-      createConnectionSocket(server_addr_, local_addr, nullptr));
-  EXPECT_NE(old_port, local_addr->ip()->port());
-  // Send the rest data.
-  codec_client_->sendData(*request_encoder_, 1024u, true);
-  waitForNextUpstreamRequest(0, TestUtility::DefaultTimeout);
-  // Send response headers, and end_stream if there is no response body.
-  const Http::TestResponseHeaderMapImpl response_headers{{":status", "200"}};
-  size_t response_size{5u};
-  upstream_request_->encodeHeaders(response_headers, false);
-  upstream_request_->encodeData(response_size, true);
-  ASSERT_TRUE(response->waitForEndStream());
-  verifyResponse(std::move(response), "200", response_headers, std::string(response_size, 'a'));
-
-  EXPECT_TRUE(upstream_request_->complete());
-  EXPECT_EQ(1024u * 2, upstream_request_->bodyLength());
   cleanupUpstreamAndDownstream();
 }
 
