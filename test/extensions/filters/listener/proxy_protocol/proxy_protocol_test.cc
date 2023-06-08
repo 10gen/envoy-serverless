@@ -1587,7 +1587,7 @@ TEST_P(ProxyProtocolTest, V2ExtractTLVToFilterState) {
   const auto& proxy_proto_data = filter_state
                                      ->getDataReadOnly<Network::ProxyProtocolFilterState>(
                                          Network::ProxyProtocolFilterState::key())
-                                     .value();
+                                     ->value();
 
   EXPECT_EQ(2, proxy_proto_data.tlv_vector_.size());
   EXPECT_EQ(0x0, proxy_proto_data.tlv_vector_[0].type);
