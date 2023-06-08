@@ -561,7 +561,7 @@ std::string TunnelingConfigHelperImpl::host(const StreamInfo::StreamInfo& stream
                                absl::string_view());
 }
 
-void Filter::onConnectTimeout() {
+void Filter::onConnectTimeout() { 
   ENVOY_CONN_LOG(debug, "connect timeout", read_callbacks_->connection());
   read_callbacks_->upstreamHost()->outlierDetector().putResult(
       Upstream::Outlier::Result::LocalOriginTimeout);
