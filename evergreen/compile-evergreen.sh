@@ -12,3 +12,4 @@ sudo podman --root="$(pwd)/containers" run \
     -v "$(pwd)/build:/build" \
     $DOCKER_IMAGE \
     $REPODIR/evergreen/compile.sh
+    
