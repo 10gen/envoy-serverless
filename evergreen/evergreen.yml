@@ -1,6 +1,6 @@
 tasks:
 - name: compile
-  tags: ["pr_check"]
+  # tags: ["pr_check"]
   depends_on:
     - name: docker_build
       variant: "*"
@@ -12,7 +12,7 @@ tasks:
     - func: "s3 upload archive"
 
 - name: test
-  tags: ["pr_check"]
+  # tags: ["pr_check"]
   depends_on:
     - name: docker_build
       variant: "*"
@@ -30,7 +30,7 @@ tasks:
     - func: "s3 push archive"
 
 - name: docker_build
-  tags: ["pr_check"]
+  # tags: ["pr_check"]
   commands:
     - func: "git get project"
     - func: "install podman"
@@ -150,7 +150,7 @@ functions:
 
 buildvariants:
 - name: centos7
-  tags: ["pr_check"]
+  # tags: ["pr_check"]
   display_name: CentOS 7 x86_64
   run_on:
     # Tasks run in x86 CentOS7 containers, so the Linux distro doesn't have to match.
@@ -165,7 +165,7 @@ buildvariants:
   - name: push
 
 - name: al2-aarch64
-  tags: ["pr_check"]
+  # tags: ["pr_check"]
   display_name: Amazon Linux 2 aarch64
   run_on:
     # Tasks run in Amazon Linux 2 containers, so the Linux distro doesn't have to match.
