@@ -72,12 +72,12 @@ functions:
     params:
       binary: bash
       args:
-      - "src/evergreen/archive-evergreen.sh"
+      - "src/evergreen/archive_evergreen.sh"
       env:
         DISTRO: ${distro}
         ARCH: ${arch}
-  # Upload archives to the S3 directory for this build.
 
+  # Upload archives to the S3 directory for this build.
   "s3 upload archive":
     command: s3.put
     params:
