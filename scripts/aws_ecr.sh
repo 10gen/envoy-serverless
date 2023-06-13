@@ -254,28 +254,24 @@ esac
 
 # Verify that SCRIPT_PATH exists and is a valid file if requested.
 if ${RUN_SCRIPT} && [ ! -f "${SCRIPT_PATH}" ]; then
-  echo "script path"
   usage
   exit 1
 fi
 
 # Verify that BUILD_DIR exists and is a valid directory if requested.
 if ${MOUNT_BUILD_DIR} && [ ! -d "${BUILD_DIR}" ]; then
-  echo "build dir"
   usage
   exit 1
 fi
 
 # Verify that ATLASPROXY_DIR exists and is a valid directory if requested.
 if ${MOUNT_ATLASPROXY_DIR} && [ ! -d "${ATLASPROXY_DIR}" ]; then
-  echo "atlas proxy dir"
   usage
   exit 1
 fi
 
 # Verify that SSH_DIR exists and is a valid directory if requested.
 if ${MOUNT_SSH_DIR} && [ ! -d "${SSH_DIR}" ]; then
-  echo "mount ssh dir"
   usage
   exit 1
 fi

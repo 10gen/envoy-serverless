@@ -16,7 +16,7 @@ RUN curl -L -o mongodbtoolchain.tar.gz -L http://mongodbtoolchain.build.10gen.cc
 ENV PATH="/opt/mongodbtoolchain/v4/bin:$PATH"
 ENV LD_LIBRARY_PATH="/opt/mongodbtoolchain/v4/lib"
 ENV CC="/opt/mongodbtoolchain/v4/bin/clang"
-ENV CXX="/clang++"
+ENV CXX="/opt/mongodbtoolchain/v4/bin/clang++"
 
 # Install Bazel.
 RUN curl -L -o /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/download/v1.9.0/bazelisk-linux-$([ $(uname -m) = "aarch64" ] && echo "arm64" || echo "amd64") && \
