@@ -1,14 +1,13 @@
-FROM centos:7
+FROM amazonlinux:2
 
-RUN yum install -y epel-release which
+RUN amazon-linux-extras install epel && yum install -y which jq
 RUN yum groupinstall -y 'Development Tools'
-RUN yum install -y jq
 
 # Add GitHub's keys to the SSH known hosts file.
 RUN mkdir -p /root/.ssh && curl --silent https://api.github.com/meta | jq --raw-output '"github.com "+.ssh_keys[]' >> /root/.ssh/known_hosts
 
-# Pre-pack the MongoDB toolchain into the CentOS 7 image.
-RUN curl -L -o mongodbtoolchain.tar.gz -L http://mongodbtoolchain.build.10gen.cc/toolchain/rhel70/x86_64/latest && \
+# Pre-pack the MongoDB toolchain into the Amazon Linux 2 image.
+RUN curl -L -o mongodbtoolchain.tar.gz -L http://mongodbtoolchain.build.10gen.cc/toolchain/$([ $(uname -m) = "aarch64" ] && echo "amazon2-arm64" || echo "amazon2")/x86_64/latest && \
   mkdir -p /opt/mongodbtoolchain/revisions && \
   REVISION=$(tar --list -f mongodbtoolchain.tar.gz | head -1 | sed 's/\/$//') && \
   tar -C /opt/mongodbtoolchain/revisions -xzvf mongodbtoolchain.tar.gz $REVISION && \
@@ -19,13 +18,12 @@ ENV LD_LIBRARY_PATH="/opt/mongodbtoolchain/v4/lib"
 ENV CC="/opt/mongodbtoolchain/v4/bin/clang"
 ENV CXX="/opt/mongodbtoolchain/v4/bin/clang++"
 
-# To build v8, gn is required, but a different version of glibc is expected. Use the version built by the SRE team.
-RUN yum install -y rpm cpio
-RUN curl -L https://xgen-sre-rpms.s3.amazonaws.com/RPMS/7/x86_64/gn-0.01-188.el7.x86_64.rpm | rpm2cpio | cpio -i --to-stdout './usr/bin/gn' > /usr/local/bin/gn && chmod +x /usr/local/bin/gn
-
 # Install Bazel.
-RUN curl -L -o /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/download/v1.9.0/bazelisk-linux-amd64 && \
+RUN curl -L -o /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/download/v1.9.0/bazelisk-linux-$([ $(uname -m) = "aarch64" ] && echo "arm64" || echo "amd64") && \
   chmod +x /usr/local/bin/bazel
+
+# Silence the error that Git detected dubious ownership in the repository.
+RUN git config --global --add safe.directory '*'
 
 # Install m, the MongoDB version manager.
 RUN curl -L -o /usr/local/bin/m https://raw.githubusercontent.com/aheckmann/m/master/bin/m && \
@@ -36,14 +34,14 @@ ENV PATH="$M_PREFIX/bin:$PATH"
 ENV MONGO_DIR="/root/.m/bin"
 
 # Install mongosh.
-RUN curl -L -o mongosh.tar.gz https://downloads.mongodb.com/compass/mongosh-1.8.0-linux-x64.tgz && \
+RUN curl -L -o mongosh.tar.gz https://downloads.mongodb.com/compass/mongosh-1.8.0-linux-$([ $(uname -m) = "aarch64" ] && echo "arm64" || echo "x64").tgz && \
   tar -C /usr/local/lib -xzvf mongosh.tar.gz && \
-  chmod 755 /usr/local/lib/mongosh-1.8.0-linux-x64/bin/mongosh && \
-  ln -s /usr/local/lib/mongosh-1.8.0-linux-x64/bin/mongosh /usr/local/bin/mongosh && \
+  chmod 755 /usr/local/lib/mongosh-1.8.0-linux-$([ $(uname -m) = "aarch64" ] && echo "arm64" || echo "x64")/bin/mongosh && \
+  ln -s /usr/local/lib/mongosh-1.8.0-linux-$([ $(uname -m) = "aarch64" ] && echo "arm64" || echo "x64")/bin/mongosh /usr/local/bin/mongosh && \
   rm mongosh.tar.gz
 
 # Install go.
-RUN curl -L -o go.tar.gz https://go.dev/dl/go1.20.2.linux-amd64.tar.gz && \
+RUN curl -L -o go.tar.gz https://go.dev/dl/go1.20.2.linux-$([ $(uname -m) = "aarch64" ] && echo "arm64" || echo "amd64").tar.gz && \
   tar -C /usr/local -xzvf go.tar.gz && \
   rm go.tar.gz
 ENV PATH="$PATH:/usr/local/go/bin"

@@ -1,20 +1,26 @@
 tasks:
 - name: compile
   tags: ["pr_check"]
+  depends_on:
+    - name: docker_build
+      variant: "*"
   commands:
-    - command: git.get_project
-      params:
-        directory: src
+    - func: "git get project"
+    - func: "install podman"
     - func: "compile envoy"
     - func: "archive"
     - func: "s3 upload archive"
+
 - name: test
   tags: ["pr_check"]
+  depends_on:
+    - name: docker_build
+      variant: "*"
   commands:
-    - command: git.get_project
-      params:
-        directory: src
+    - func: "git get project"
+    - func: "install podman"
     - func: "test envoy"
+
 - name: push
   patchable: false
   depends_on:
@@ -23,32 +29,54 @@ tasks:
     - func: "create push credentials"
     - func: "s3 push archive"
 
+- name: docker_build
+  tags: ["pr_check"]
+  commands:
+    - func: "git get project"
+    - func: "install podman"
+    - func: "build and push docker image"
+
 functions:
+  "git get project":
+    command: git.get_project
+    type: setup
+    params:
+      directory: src
+
   "compile envoy":
     command: subprocess.exec
     params:
-      binary: bash
-      args:
-      - "src/evergreen/compile-evergreen.sh"
+      working_dir: src
+      shell: bash
+      binary: scripts/aws_ecr.sh --distro ${distro} --pull-docker-image --run-script ./evergreen/compile.sh --mount-build-dir ./build --use-podman --print-trace
       env:
-        DOCKER_IMAGE: ${docker_image}
+        # Set the AWS access/secret keys of evergreen_serverless_proxy_test_user as environment variables.
+        # See https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html#cli-configure-files-methods.
+        AWS_ACCESS_KEY_ID: ${serverless_proxy_aws_key}
+        AWS_SECRET_ACCESS_KEY: ${serverless_proxy_secret_key}
+
   "test envoy":
     command: subprocess.exec
     params:
-      binary: bash
-      args:
-      - "src/evergreen/test-evergreen.sh"
+      working_dir: src
+      shell: bash
+      binary: scripts/aws_ecr.sh --distro ${distro} --pull-docker-image --run-script ./evergreen/test.sh --mount-build-dir ./build --use-podman --print-trace
       env:
-        DOCKER_IMAGE: ${docker_image}
+        # Set the AWS access/secret keys of evergreen_serverless_proxy_test_user as environment variables.
+        # See https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html#cli-configure-files-methods.
+        AWS_ACCESS_KEY_ID: ${serverless_proxy_aws_key}
+        AWS_SECRET_ACCESS_KEY: ${serverless_proxy_secret_key}
+
   "archive":
     command: subprocess.exec
     params:
       binary: bash
       args:
-      - "src/evergreen/archive-evergreen.sh"
+      - "src/evergreen/archive_evergreen.sh"
       env:
         DISTRO: ${distro}
         ARCH: ${arch}
+
   # Upload archives to the S3 directory for this build.
   "s3 upload archive":
     command: s3.put
@@ -61,6 +89,7 @@ functions:
       remote_file: build/${build_id}/
       permissions: public-read
       content_type: "application/x-gzip"
+
   "create push credentials":
     command: shell.exec
     params:
@@ -78,6 +107,7 @@ functions:
         echo "[default]" > cred.aws
         chmod 700 cred.aws
         echo region=us-east-1 >> cred.aws
+
   "s3 push archive":
     - command: shell.exec
       params:
@@ -95,6 +125,29 @@ functions:
             | grep "envoy-serverless-.*\.tar\.gz"  \
             | xargs -I{} -n1 aws s3 cp s3://$BUCKET/build/${build_id}/{} s3://$BUCKET/tarballs/ --acl public-read
 
+  "install podman":
+    command: shell.exec
+    type: setup
+    params:
+      working_dir: src
+      shell: bash
+      script: |
+        set -xeuo pipefail
+        sudo yum install -y podman fuse-overlayfs conmon
+        mkdir ./build
+
+  "build and push docker image":
+    command: subprocess.exec
+    params:
+      working_dir: src
+      shell: bash
+      binary: scripts/aws_ecr.sh --distro ${distro} --build-docker-image --push-docker-image --use-podman --print-trace
+      env:
+        # Set the AWS access/secret keys of evergreen_serverless_proxy_test_user as environment variables.
+        # See https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html#cli-configure-files-methods.
+        AWS_ACCESS_KEY_ID: ${serverless_proxy_aws_key}
+        AWS_SECRET_ACCESS_KEY: ${serverless_proxy_secret_key}
+
 buildvariants:
 - name: centos7
   tags: ["pr_check"]
@@ -103,10 +156,10 @@ buildvariants:
     # Tasks run in x86 CentOS7 containers, so the Linux distro doesn't have to match.
     - rhel80-xlarge
   expansions:
-    docker_image: docker.io/siyuanzhou/envoy-serverless-centos7
     distro: rhel7
     arch: x86_64
   tasks:
+  - name: docker_build
   - name: compile
   - name: test
   - name: push
@@ -118,11 +171,10 @@ buildvariants:
     # Tasks run in Amazon Linux 2 containers, so the Linux distro doesn't have to match.
     - rhel82-arm64-large
   expansions:
-    docker_image: docker.io/siyuanzhou/envoy-serverless-al2-aarch64
     distro: al2
     arch: aarch64
   tasks:
+  - name: docker_build
   - name: compile
   - name: test
   - name: push
-
