@@ -237,7 +237,6 @@ done
 
 # Verify that DISTRO exists and is valid.
 if [ -z "${DISTRO}" ]; then
-  echo "distro"
   usage
   exit 1
 fi
@@ -246,7 +245,6 @@ case "${DISTRO}" in
 rhel7 | al2 | al2022)
   ;;
 *)
-  echo "distro not in set"
   usage
   exit 1
   ;;
