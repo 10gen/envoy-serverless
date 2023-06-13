@@ -5,9 +5,8 @@
 
 set -xeuo pipefail
 
-source $(dirname "$0")/set-up-env.sh
+source $(dirname "$0")/setup_env.sh
 
 # If this script can be executed, then /etc/envoy-serverless must be accessable.
 cd /etc/envoy-serverless
 bazel ${bazel_startup_flags} build ${bazel_flags} -- //:envoy
-
