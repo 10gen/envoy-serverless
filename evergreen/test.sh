@@ -6,7 +6,7 @@
 set -euo pipefail
 set -x
 
-source $(dirname "$0")/set-up-env.sh
+source $(dirname "$0")/setup_env.sh
 
 # Test targets listed in repo's .bazelci config
 export bazel_tests="//test/common/common/... //test/integration/... //test/exe/..."
@@ -20,4 +20,3 @@ export bazel_test_flags="--test_output=errors --flaky_test_attempts=//test/integ
 # If this script can be executed, then /etc/envoy-serverless must be accessable.
 cd /etc/envoy-serverless
 bazel ${bazel_startup_flags} test ${bazel_flags} ${bazel_test_flags} -- ${bazel_tests}
-
