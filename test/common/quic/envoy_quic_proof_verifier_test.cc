@@ -89,7 +89,6 @@ protected:
   NiceMock<Ssl::MockClientContextConfig> client_context_config_;
   Ssl::MockCertificateValidationContextConfig cert_validation_ctx_config_;
   std::unique_ptr<EnvoyQuicProofVerifier> verifier_;
-  NiceMock<Ssl::MockContextManager> tls_context_manager_;
 };
 
 TEST_F(EnvoyQuicProofVerifierTest, VerifyCertChainSuccess) {
