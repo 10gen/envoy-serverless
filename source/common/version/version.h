@@ -5,7 +5,6 @@
 #include "envoy/config/core/v3/base.pb.h"
 
 #include "source/common/singleton/const_singleton.h"
-#include "source/common/version/git_version_number.h"
 #include "source/common/version/version_number.h"
 
 namespace Envoy {
