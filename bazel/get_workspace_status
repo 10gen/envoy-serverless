@@ -41,6 +41,5 @@ git diff-index --quiet HEAD -- || {
 echo "BUILD_SCM_STATUS ${tree_status}"
 echo "STABLE_BUILD_SCM_STATUS ${tree_status}"
 
-# Generate a build version number to label built binaries in the format specified in evergreen scripts
+# Generate a build version number to label built binaries in the format specified in evergreen/archive-evergreen-rhel7-amd64.sh
 git_version_number=$(git describe --tags --dirty --always --match 'v[0-9]*' --abbrev=7 | cut -c 2-)
-echo "GIT_VERSION_NUMBER ${git_version_number}"
