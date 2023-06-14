@@ -43,11 +43,10 @@ TEST(RateLimitFilterConfigTest, RatelimitCorrectProto) {
 
   NiceMock<Server::Configuration::MockFactoryContext> context;
 
-  EXPECT_CALL(context.cluster_manager_.async_client_manager_, getOrCreateRawAsyncClient(_, _, _, _))
-      .WillOnce(Invoke(
-          [](const envoy::config::core::v3::GrpcService&, Stats::Scope&, bool, Grpc::CacheOption) {
-            return std::make_unique<NiceMock<Grpc::MockAsyncClient>>();
-          }));
+  EXPECT_CALL(context.cluster_manager_.async_client_manager_, getOrCreateRawAsyncClient(_, _, _))
+      .WillOnce(Invoke([](const envoy::config::core::v3::GrpcService&, Stats::Scope&, bool) {
+        return std::make_unique<NiceMock<Grpc::MockAsyncClient>>();
+      }));
 
   RateLimitFilterConfig factory;
   Http::FilterFactoryCb cb = factory.createFilterFactoryFromProto(proto_config, "stats", context);
@@ -77,19 +76,7 @@ TEST(RateLimitFilterConfigTest, BadRateLimitFilterConfig) {
   )EOF";
 
   envoy::extensions::filters::http::ratelimit::v3::RateLimit proto_config{};
-  EXPECT_THROW_WITH_REGEX(TestUtility::loadFromYamlAndValidate(yaml, proto_config), EnvoyException,
-                          "route_key: Cannot find field");
-}
-
-// Test that the deprecated extension name is disabled by default.
-// TODO(zuercher): remove when envoy.deprecated_features.allow_deprecated_extension_names is removed
-TEST(RateLimitFilterConfigTest, DEPRECATED_FEATURE_TEST(DeprecatedExtensionFilterName)) {
-  const std::string deprecated_name = "envoy.rate_limit";
-
-  ASSERT_EQ(
-      nullptr,
-      Registry::FactoryRegistry<Server::Configuration::NamedHttpFilterConfigFactory>::getFactory(
-          deprecated_name));
+  EXPECT_THROW(TestUtility::loadFromYamlAndValidate(yaml, proto_config), EnvoyException);
 }
 
 } // namespace

@@ -109,7 +109,6 @@ envoy_cc_library(
     deps = [
         "//envoy/event:dispatcher_interface",
         "//envoy/thread:thread_interface",
-        "//source/server:hot_restart_cc_proto",
     ],
 )
 
@@ -158,6 +157,7 @@ envoy_cc_library(
     name = "worker_interface",
     hdrs = ["worker.h"],
     deps = [
+        "//envoy/runtime:runtime_interface",
         "//envoy/server:guarddog_interface",
         "//envoy/server/overload:overload_manager_interface",
     ],
@@ -247,6 +247,7 @@ envoy_cc_library(
         ":drain_manager_interface",
         ":filter_config_interface",
         ":guarddog_interface",
+        "//envoy/filter:config_provider_manager_interface",
         "//envoy/network:filter_interface",
         "//envoy/network:listen_socket_interface",
         "//envoy/network:socket_interface_interface",
@@ -298,7 +299,7 @@ envoy_cc_library(
     name = "proactive_resource_monitor_interface",
     hdrs = ["proactive_resource_monitor.h"],
     deps = [
-        "//envoy/stats:stats_interface",
+        "//source/common/stats:symbol_table_lib",
     ],
 )
 

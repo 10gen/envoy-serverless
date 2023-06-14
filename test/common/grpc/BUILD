@@ -170,6 +170,7 @@ envoy_cc_test_library(
 
 envoy_cc_test(
     name = "grpc_client_integration_test",
+    size = "large",
     srcs = ["grpc_client_integration_test.cc"],
     deps = [
         ":grpc_client_integration_test_harness_lib",
@@ -200,5 +201,15 @@ envoy_cc_test(
         "//test/proto:helloworld_proto_cc_proto",
         "//test/test_common:test_time_lib",
         "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
+    ],
+)
+
+envoy_cc_test(
+    name = "buffered_message_ttl_manager_test",
+    srcs = ["buffered_message_ttl_manager_test.cc"],
+    deps = [
+        "//source/common/event:dispatcher_lib",
+        "//source/common/grpc:buffered_message_ttl_manager_lib",
+        "//test/test_common:utility_lib",
     ],
 )

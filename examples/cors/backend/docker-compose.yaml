@@ -1,15 +1,18 @@
-version: "3.7"
 services:
 
   front-envoy:
     build:
-      context: .
-      dockerfile: Dockerfile-frontenvoy
+      dockerfile: ../../shared/envoy/Dockerfile
+    depends_on:
+      backend-service:
+        condition: service_healthy
     ports:
-    - "8002:8000"
-    - "8003:8001"
+    - "${PORT_BACKEND:-8002}:10000"
+    - "${PORT_STATS:-8003}:8001"
 
   backend-service:
     build:
-      context: .
-      dockerfile: Dockerfile-service
+      context: ../../shared/python
+      target: aiohttp-service
+    volumes:
+    - ./service.py:/code/service.py

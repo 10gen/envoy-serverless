@@ -47,6 +47,14 @@ void initializeUpstreamTlsContextConfig(
       private_key:
         filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/expired_spiffe_san_key.pem"
 )EOF";
+  } else if (options.client_with_intermediate_cert_) {
+    yaml_plain += R"EOF(
+    tls_certificates:
+      certificate_chain:
+        filename: "{{ test_rundir }}/test/config/integration/certs/client2_chain.pem"
+      private_key:
+        filename: "{{ test_rundir }}/test/config/integration/certs/client2key.pem"
+)EOF";
   } else {
     yaml_plain += R"EOF(
     tls_certificates:
@@ -87,15 +95,22 @@ void initializeUpstreamTlsContextConfig(
   for (const std::string& cipher_suite : options.cipher_suites_) {
     common_context->mutable_tls_params()->add_cipher_suites(cipher_suite);
   }
+  for (const std::string& algorithm : options.sigalgs_) {
+    common_context->mutable_tls_params()->add_signature_algorithms(algorithm);
+  }
   if (!options.sni_.empty()) {
     tls_context.set_sni(options.sni_);
+  }
+  if (options.custom_validator_config_) {
+    common_context->mutable_validation_context()->set_allocated_custom_validator_config(
+        options.custom_validator_config_);
   }
 
   common_context->mutable_tls_params()->set_tls_minimum_protocol_version(options.tls_version_);
   common_context->mutable_tls_params()->set_tls_maximum_protocol_version(options.tls_version_);
 }
 
-Network::TransportSocketFactoryPtr
+Network::UpstreamTransportSocketFactoryPtr
 createClientSslTransportSocketFactory(const ClientSslTransportOptions& options,
                                       ContextManager& context_manager, Api::Api& api) {
   envoy::extensions::transport_sockets::tls::v3::UpstreamTlsContext tls_context;
@@ -104,15 +119,15 @@ createClientSslTransportSocketFactory(const ClientSslTransportOptions& options,
   NiceMock<Server::Configuration::MockTransportSocketFactoryContext> mock_factory_ctx;
   ON_CALL(mock_factory_ctx, api()).WillByDefault(ReturnRef(api));
   auto cfg = std::make_unique<Extensions::TransportSockets::Tls::ClientContextConfigImpl>(
-      tls_context, options.sigalgs_, mock_factory_ctx);
+      tls_context, mock_factory_ctx);
   static auto* client_stats_store = new Stats::TestIsolatedStoreImpl();
-  return Network::TransportSocketFactoryPtr{
-      new Extensions::TransportSockets::Tls::ClientSslSocketFactory(std::move(cfg), context_manager,
-                                                                    *client_stats_store)};
+  return Network::UpstreamTransportSocketFactoryPtr{
+      new Extensions::TransportSockets::Tls::ClientSslSocketFactory(
+          std::move(cfg), context_manager, *client_stats_store->rootScope())};
 }
 
-Network::TransportSocketFactoryPtr createUpstreamSslContext(ContextManager& context_manager,
-                                                            Api::Api& api, bool use_http3) {
+Network::DownstreamTransportSocketFactoryPtr
+createUpstreamSslContext(ContextManager& context_manager, Api::Api& api, bool use_http3) {
   envoy::extensions::transport_sockets::tls::v3::DownstreamTlsContext tls_context;
   ConfigHelper::initializeTls({}, *tls_context.mutable_common_tls_context());
 
@@ -121,10 +136,11 @@ Network::TransportSocketFactoryPtr createUpstreamSslContext(ContextManager& cont
   auto cfg = std::make_unique<Extensions::TransportSockets::Tls::ServerContextConfigImpl>(
       tls_context, mock_factory_ctx);
 
-  static Stats::Scope* upstream_stats_store = new Stats::TestIsolatedStoreImpl();
+  static auto* upstream_stats_store = new Stats::TestIsolatedStoreImpl();
   if (!use_http3) {
     return std::make_unique<Extensions::TransportSockets::Tls::ServerSslSocketFactory>(
-        std::move(cfg), context_manager, *upstream_stats_store, std::vector<std::string>{});
+        std::move(cfg), context_manager, *upstream_stats_store->rootScope(),
+        std::vector<std::string>{});
   }
   envoy::extensions::transport_sockets::quic::v3::QuicDownstreamTransport quic_config;
   quic_config.mutable_downstream_tls_context()->MergeFrom(tls_context);
@@ -136,7 +152,7 @@ Network::TransportSocketFactoryPtr createUpstreamSslContext(ContextManager& cont
   return config_factory.createTransportSocketFactory(quic_config, mock_factory_ctx, server_names);
 }
 
-Network::TransportSocketFactoryPtr createFakeUpstreamSslContext(
+Network::DownstreamTransportSocketFactoryPtr createFakeUpstreamSslContext(
     const std::string& upstream_cert_name, ContextManager& context_manager,
     Server::Configuration::TransportSocketFactoryContext& factory_context) {
   envoy::extensions::transport_sockets::tls::v3::DownstreamTlsContext tls_context;
@@ -150,9 +166,10 @@ Network::TransportSocketFactoryPtr createFakeUpstreamSslContext(
   auto cfg = std::make_unique<Extensions::TransportSockets::Tls::ServerContextConfigImpl>(
       tls_context, factory_context);
 
-  static Stats::Scope* upstream_stats_store = new Stats::IsolatedStoreImpl();
+  static auto* upstream_stats_store = new Stats::IsolatedStoreImpl();
   return std::make_unique<Extensions::TransportSockets::Tls::ServerSslSocketFactory>(
-      std::move(cfg), context_manager, *upstream_stats_store, std::vector<std::string>{});
+      std::move(cfg), context_manager, *upstream_stats_store->rootScope(),
+      std::vector<std::string>{});
 }
 Network::Address::InstanceConstSharedPtr getSslAddress(const Network::Address::IpVersion& version,
                                                        int port) {

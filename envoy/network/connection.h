@@ -30,6 +30,7 @@ enum class ConnectionEvent {
   RemoteClose,
   LocalClose,
   Connected,
+  ConnectedZeroRtt,
 };
 
 /**
@@ -67,9 +68,11 @@ public:
  */
 enum class ConnectionCloseType {
   FlushWrite, // Flush pending write data before raising ConnectionEvent::LocalClose
-  NoFlush,    // Do not flush any pending data and immediately raise ConnectionEvent::LocalClose
-  FlushWriteAndDelay // Flush pending write data and delay raising a ConnectionEvent::LocalClose
-                     // until the delayed_close_timeout expires
+  NoFlush, // Do not flush any pending data. Write the pending data to buffer and then immediately
+           // raise ConnectionEvent::LocalClose
+  FlushWriteAndDelay, // Flush pending write data and delay raising a ConnectionEvent::LocalClose
+                      // until the delayed_close_timeout expires
+  Abort // Do not write/flush any pending data and immediately raise ConnectionEvent::LocalClose
 };
 
 /**
@@ -128,12 +131,20 @@ public:
   /**
    * @return true if half-close semantics are enabled, false otherwise.
    */
-  virtual bool isHalfCloseEnabled() PURE;
+  virtual bool isHalfCloseEnabled() const PURE;
 
   /**
    * Close the connection.
+   * @param type the connection close type.
    */
   virtual void close(ConnectionCloseType type) PURE;
+
+  /**
+   * Close the connection.
+   * @param type the connection close type.
+   * @param details the reason the connection is being closed.
+   */
+  virtual void close(ConnectionCloseType type, absl::string_view details) PURE;
 
   /**
    * @return Event::Dispatcher& the dispatcher backing this connection.
@@ -194,6 +205,7 @@ public:
   /**
    * @return the connection info provider backing this connection.
    */
+  virtual ConnectionInfoSetter& connectionInfoSetter() PURE;
   virtual const ConnectionInfoProvider& connectionInfoProvider() const PURE;
   virtual ConnectionInfoProviderSharedPtr connectionInfoProviderSharedPtr() const PURE;
 
@@ -307,10 +319,16 @@ public:
   virtual void setDelayedCloseTimeout(std::chrono::milliseconds timeout) PURE;
 
   /**
-   * @return std::string the failure reason of the underlying transport socket, if no failure
-   *         occurred an empty string is returned.
+   * @return absl::string_view the failure reason of the underlying transport socket, if no failure
+   *         occurred an empty string view is returned.
    */
   virtual absl::string_view transportFailureReason() const PURE;
+
+  /**
+   * @return absl::string_view the local close reason of the underlying socket, if local close
+   *         did not occur an empty string view is returned.
+   */
+  virtual absl::string_view localCloseReason() const PURE;
 
   /**
    * Instructs the connection to start using secure transport.
@@ -326,6 +344,29 @@ public:
    *  returned.
    */
   virtual absl::optional<std::chrono::milliseconds> lastRoundTripTime() const PURE;
+
+  /**
+   * Try to configure the connection's initial congestion window.
+   * The operation is advisory - the connection may not support it, even if it's supported, it may
+   * not do anything after the first few network round trips with the peer.
+   * @param bandwidth_bits_per_sec The estimated bandwidth between the two endpoints of the
+   * connection.
+   * @param rtt The estimated round trip time between the two endpoints of the connection.
+   *
+   * @note Envoy does not provide an implementation for TCP connections because
+   * there is no portable system api to do so. Applications can implement it
+   * with a proprietary api in a customized TransportSocket.
+   */
+  virtual void configureInitialCongestionWindow(uint64_t bandwidth_bits_per_sec,
+                                                std::chrono::microseconds rtt) PURE;
+
+  /**
+   * @return the current congestion window in bytes, or unset if not available or not
+   * congestion-controlled.
+   * @note some congestion controller's cwnd is measured in number of packets, in that case the
+   * return value is cwnd(in packets) times the connection's MSS.
+   */
+  virtual absl::optional<uint64_t> congestionWindowInBytes() const PURE;
 };
 
 using ConnectionPtr = std::unique_ptr<Connection>;

@@ -3,7 +3,7 @@
 #include <regex>
 
 #include "source/common/config/well_known_names.h"
-#include "source/common/stats/symbol_table_impl.h"
+#include "source/common/stats/symbol_table.h"
 
 namespace Envoy {
 namespace Stats {
@@ -21,19 +21,6 @@ TagStatNameJoiner::TagStatNameJoiner(StatName prefix, StatName stat_name,
     name_with_tags_ = StatName(full_name_storage_.get());
   } else {
     name_with_tags_ = StatName(prefix_storage_.get());
-  }
-}
-
-TagStatNameJoiner::TagStatNameJoiner(StatName stat_name,
-                                     StatNameTagVectorOptConstRef stat_name_tags,
-                                     SymbolTable& symbol_table) {
-  tag_extracted_name_ = stat_name;
-
-  if (stat_name_tags) {
-    full_name_storage_ = joinNameAndTags(stat_name, *stat_name_tags, symbol_table);
-    name_with_tags_ = StatName(full_name_storage_.get());
-  } else {
-    name_with_tags_ = stat_name;
   }
 }
 

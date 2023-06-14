@@ -51,6 +51,7 @@ envoy_cc_mock(
     hdrs = ["options.h"],
     deps = [
         "//envoy/server:options_interface",
+        "//source/common/config:well_known_names",
         "@envoy_api//envoy/admin/v3:pkg_cc_proto",
         "@envoy_api//envoy/config/bootstrap/v3:pkg_cc_proto",
     ],
@@ -242,6 +243,7 @@ envoy_cc_mock(
     deps = [
         "//envoy/server:tracer_config_interface",
         "//source/common/secret:secret_manager_impl_lib",
+        "//test/mocks/access_log:access_log_mocks",
         "//test/mocks/api:api_mocks",
         "//test/mocks/server:config_tracker_mocks",
         "//test/mocks/server:options_mocks",

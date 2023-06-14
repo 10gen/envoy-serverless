@@ -7,10 +7,10 @@
 #include "envoy/service/secret/v3/sds.pb.h"
 
 #include "source/common/config/datasource.h"
-#include "source/common/config/filesystem_subscription_impl.h"
 #include "source/common/secret/sds_api.h"
 #include "source/common/ssl/certificate_validation_context_config_impl.h"
 #include "source/common/ssl/tls_certificate_config_impl.h"
+#include "source/extensions/config_subscription/filesystem/filesystem_subscription_impl.h"
 
 #include "test/common/stats/stat_test_utility.h"
 #include "test/mocks/config/mocks.h"
@@ -100,9 +100,10 @@ TEST_F(SdsApiTest, InitManagerInitialised) {
   const std::string sds_config_path = TestEnvironment::writeStringToFileForTest(
       "sds.yaml", TestEnvironment::substitute(sds_config), false);
   NiceMock<Config::MockSubscriptionCallbacks> callbacks;
-  TestUtility::TestOpaqueResourceDecoderImpl<envoy::extensions::transport_sockets::tls::v3::Secret>
-      resource_decoder("name");
-  Config::SubscriptionStats stats(Config::Utility::generateStats(stats_));
+  Config::OpaqueResourceDecoderSharedPtr resource_decoder(
+      std::make_shared<TestUtility::TestOpaqueResourceDecoderImpl<
+          envoy::extensions::transport_sockets::tls::v3::Secret>>("name"));
+  Config::SubscriptionStats stats(Config::Utility::generateStats(*stats_.rootScope()));
   NiceMock<ProtobufMessage::MockValidationVisitor> validation_visitor;
   envoy::config::core::v3::ConfigSource config_source;
 
@@ -110,11 +111,11 @@ TEST_F(SdsApiTest, InitManagerInitialised) {
       .WillOnce(Invoke([this, &sds_config_path, &resource_decoder,
                         &stats](const envoy::config::core::v3::ConfigSource&, absl::string_view,
                                 Stats::Scope&, Config::SubscriptionCallbacks& cbs,
-                                Config::OpaqueResourceDecoder&,
+                                Config::OpaqueResourceDecoderSharedPtr,
                                 const Config::SubscriptionOptions&) -> Config::SubscriptionPtr {
-        return std::make_unique<Config::FilesystemSubscriptionImpl>(*dispatcher_, sds_config_path,
-                                                                    cbs, resource_decoder, stats,
-                                                                    validation_visitor_, *api_);
+        return std::make_unique<Config::FilesystemSubscriptionImpl>(
+            *dispatcher_, Config::makePathConfigSource(sds_config_path), cbs, resource_decoder,
+            stats, validation_visitor_, *api_);
       }));
 
   auto init_manager = Init::ManagerImpl("testing");

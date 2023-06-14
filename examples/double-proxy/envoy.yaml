@@ -24,6 +24,8 @@ static_resources:
                   cluster: service1
           http_filters:
           - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
   clusters:
   - name: service1
@@ -37,4 +39,4 @@ static_resources:
             address:
               socket_address:
                 address: app
-                port_value: 8000
+                port_value: 8080

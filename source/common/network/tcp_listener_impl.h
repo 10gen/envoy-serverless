@@ -17,8 +17,8 @@ namespace Network {
 class TcpListenerImpl : public BaseListenerImpl {
 public:
   TcpListenerImpl(Event::DispatcherImpl& dispatcher, Random::RandomGenerator& random,
-                  SocketSharedPtr socket, TcpListenerCallbacks& cb, bool bind_to_port,
-                  bool ignore_global_conn_limit);
+                  Runtime::Loader& runtime, SocketSharedPtr socket, TcpListenerCallbacks& cb,
+                  bool bind_to_port, bool ignore_global_conn_limit);
   ~TcpListenerImpl() override {
     if (bind_to_port_) {
       socket_->ioHandle().resetFileEvents();
@@ -27,6 +27,7 @@ public:
   void disable() override;
   void enable() override;
   void setRejectFraction(UnitFloat reject_fraction) override;
+  void configureLoadShedPoints(Server::LoadShedPointProvider& load_shed_point_provider) override;
 
   static const absl::string_view GlobalMaxCxRuntimeKey;
 
@@ -41,9 +42,11 @@ private:
   bool rejectCxOverGlobalLimit() const;
 
   Random::RandomGenerator& random_;
+  Runtime::Loader& runtime_;
   bool bind_to_port_;
   UnitFloat reject_fraction_;
   const bool ignore_global_conn_limit_;
+  Server::LoadShedPoint* listener_accept_{nullptr};
 };
 
 } // namespace Network

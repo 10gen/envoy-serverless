@@ -13,6 +13,9 @@ namespace Matching {
  */
 class HttpMatchingDataImpl : public HttpMatchingData {
 public:
+  explicit HttpMatchingDataImpl(const StreamInfo::StreamInfo& stream_info)
+      : stream_info_(stream_info) {}
+
   static absl::string_view name() { return "http"; }
 
   void onRequestHeaders(const RequestHeaderMap& request_headers) {
@@ -47,7 +50,14 @@ public:
     return makeOptRefFromPtr(response_trailers_);
   }
 
+  const StreamInfo::StreamInfo& streamInfo() const override { return stream_info_; }
+
+  const Network::ConnectionInfoProvider& connectionInfoProvider() const override {
+    return stream_info_.downstreamAddressProvider();
+  }
+
 private:
+  const StreamInfo::StreamInfo& stream_info_;
   const RequestHeaderMap* request_headers_{};
   const ResponseHeaderMap* response_headers_{};
   const RequestTrailerMap* request_trailers_{};

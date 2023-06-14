@@ -23,6 +23,7 @@ namespace Envoy {
 namespace Router {
 
 using ::testing::NiceMock;
+using ::testing::Return;
 
 class RouterTestFilter : public Filter {
 public:
@@ -30,13 +31,18 @@ public:
   // Filter
   RetryStatePtr createRetryState(const RetryPolicy&, Http::RequestHeaderMap&,
                                  const Upstream::ClusterInfo&, const VirtualCluster*,
-                                 Runtime::Loader&, Random::RandomGenerator&, Event::Dispatcher&,
-                                 TimeSource&, Upstream::ResourcePriority) override {
+                                 RouteStatsContextOptRef, Runtime::Loader&,
+                                 Random::RandomGenerator&, Event::Dispatcher&, TimeSource&,
+                                 Upstream::ResourcePriority) override {
     EXPECT_EQ(nullptr, retry_state_);
     retry_state_ = new NiceMock<MockRetryState>();
     if (reject_all_hosts_) {
       // Set up RetryState to always reject the host
       ON_CALL(*retry_state_, shouldSelectAnotherHost(_)).WillByDefault(Return(true));
+    }
+    if (retry_425_response_) {
+      ON_CALL(*retry_state_, wouldRetryFromRetriableStatusCode(Http::Code::TooEarly))
+          .WillByDefault(Return(true));
     }
     return RetryStatePtr{retry_state_};
   }
@@ -48,12 +54,14 @@ public:
   NiceMock<Network::MockConnection> downstream_connection_;
   MockRetryState* retry_state_{};
   bool reject_all_hosts_ = false;
+  bool retry_425_response_ = false;
 };
 
 class RouterTestBase : public testing::Test {
 public:
   RouterTestBase(bool start_child_span, bool suppress_envoy_headers,
                  bool suppress_grpc_request_failure_code_stats,
+                 bool flush_upstream_log_on_upstream_stream,
                  Protobuf::RepeatedPtrField<std::string> strict_headers_to_check);
 
   void expectResponseTimerCreate();
@@ -78,6 +86,9 @@ public:
   void testAppendUpstreamHost(absl::optional<Http::LowerCaseString> hostname_header_name,
                               absl::optional<Http::LowerCaseString> host_address_header_name);
   void testDoNotForward(absl::optional<Http::LowerCaseString> not_forwarded_header_name);
+  void expectNewStreamWithImmediateEncoder(Http::RequestEncoder& encoder,
+                                           Http::ResponseDecoder** decoder,
+                                           Http::Protocol protocol);
 
   Event::SimulatedTimeSystem test_time_;
   std::string upstream_zone_{"to_az"};
@@ -95,7 +106,7 @@ public:
   MockShadowWriter* shadow_writer_;
   NiceMock<LocalInfo::MockLocalInfo> local_info_;
   FilterConfig config_;
-  RouterTestFilter router_;
+  std::unique_ptr<RouterTestFilter> router_;
   Event::MockTimer* response_timeout_{};
   Event::MockTimer* per_try_timeout_{};
   Event::MockTimer* per_try_idle_timeout_{};

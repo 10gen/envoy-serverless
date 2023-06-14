@@ -24,11 +24,12 @@
 #include "source/common/http/header_map_impl.h"
 #include "source/common/protobuf/message_validator_impl.h"
 #include "source/common/protobuf/utility.h"
-#include "source/common/stats/symbol_table_impl.h"
+#include "source/common/stats/symbol_table.h"
 
 #include "test/test_common/file_system_for_test.h"
 #include "test/test_common/logging.h"
 #include "test/test_common/printers.h"
+#include "test/test_common/test_random_generator.h"
 #include "test/test_common/test_time_system.h"
 #include "test/test_common/thread_factory_for_test.h"
 
@@ -46,6 +47,8 @@ using testing::Invoke; //  NOLINT(misc-unused-using-decls)
 namespace Envoy {
 
 #if defined(__has_feature) && __has_feature(thread_sanitizer)
+#define TSAN_TIMEOUT_FACTOR 3
+#elif defined(ENVOY_CONFIG_COVERAGE)
 #define TSAN_TIMEOUT_FACTOR 3
 #else
 #define TSAN_TIMEOUT_FACTOR 1
@@ -129,18 +132,10 @@ public:
   static void callEnvoyBug() { ENVOY_BUG(false, ""); }
 };
 
-// Random number generator which logs its seed to stderr. To repeat a test run with a non-zero seed
-// one can run the test with --test_arg=--gtest_random_seed=[seed]
-class TestRandomGenerator {
-public:
-  TestRandomGenerator();
-
-  uint64_t random();
-
-private:
-  const int32_t seed_;
-  std::ranlux48 generator_;
-  RealTimeSource real_time_source_;
+// See https://github.com/envoyproxy/envoy/issues/21245.
+enum class Http1ParserImpl {
+  HttpParser, // http-parser from node.js
+  BalsaParser // Balsa from QUICHE
 };
 
 class TestUtility {
@@ -248,7 +243,7 @@ public:
    * @param value target value.
    * @param time_system the time system to use for waiting.
    * @param timeout the maximum time to wait before timing out, or 0 for no timeout.
-   * @return AssertionSuccess() if the counter was >= to the value within the timeout, else
+   * @return AssertionSuccess() if the counter was >= the value within the timeout, else
    * AssertionFailure().
    */
   static AssertionResult
@@ -350,10 +345,7 @@ public:
    *
    * @return a filename based on the process id and current time.
    */
-
-  static std::string uniqueFilename() {
-    return absl::StrCat(getpid(), "_", std::chrono::system_clock::now().time_since_epoch().count());
-  }
+  static std::string uniqueFilename(absl::string_view prefix = "");
 
   /**
    * Compare two protos of the same type for equality.
@@ -534,13 +526,28 @@ public:
     return message;
   }
 
+  // Allows pretty printed test names.
+  static std::string http1ParserImplToString(Http1ParserImpl impl) {
+    switch (impl) {
+    case Http1ParserImpl::HttpParser:
+      return "HttpParser";
+    case Http1ParserImpl::BalsaParser:
+      return "BalsaParser";
+    }
+    return "UnknownHttp1Impl";
+  }
+
+  static std::string ipVersionToString(Network::Address::IpVersion ip_version) {
+    return ip_version == Network::Address::IpVersion::v4 ? "IPv4" : "IPv6";
+  }
+
   // Allows pretty printed test names for TEST_P using TestEnvironment::getIpVersionsForTest().
   //
   // Tests using this will be of the form IpVersions/SslSocketTest.HalfClose/IPv4
   // instead of IpVersions/SslSocketTest.HalfClose/1
   static std::string
   ipTestParamsToString(const ::testing::TestParamInfo<Network::Address::IpVersion>& params) {
-    return params.param == Network::Address::IpVersion::v4 ? "IPv4" : "IPv6";
+    return ipVersionToString(params.param);
   }
 
   /**
@@ -565,7 +572,8 @@ public:
   static std::string convertTime(const std::string& input, const std::string& input_format,
                                  const std::string& output_format);
 
-  static constexpr std::chrono::milliseconds DefaultTimeout = std::chrono::milliseconds(10000);
+  static constexpr std::chrono::milliseconds DefaultTimeout =
+      std::chrono::milliseconds(10000) * TSAN_TIMEOUT_FACTOR;
 
   /**
    * Return a prefix string matcher.
@@ -647,8 +655,9 @@ public:
                                          ProtobufMessage::getStrictValidationVisitor());
   }
 
-  template <class MessageType> static void validate(const MessageType& message) {
-    MessageUtil::validate(message, ProtobufMessage::getStrictValidationVisitor());
+  template <class MessageType>
+  static void validate(const MessageType& message, bool recurse_into_any = false) {
+    MessageUtil::validate(message, ProtobufMessage::getStrictValidationVisitor(), recurse_into_any);
   }
 
   template <class MessageType>
@@ -827,7 +836,7 @@ public:
     }
   }
   absl::string_view protocol() const override { return context_protocol_; }
-  absl::string_view authority() const override { return context_authority_; }
+  absl::string_view host() const override { return context_host_; }
   absl::string_view path() const override { return context_path_; }
   absl::string_view method() const override { return context_method_; }
   void forEach(IterateCallback callback) const override {
@@ -853,7 +862,7 @@ public:
   void setByReference(absl::string_view key, absl::string_view val) override { setByKey(key, val); }
 
   std::string context_protocol_;
-  std::string context_authority_;
+  std::string context_host_;
   std::string context_path_;
   std::string context_method_;
   absl::flat_hash_map<std::string, std::string> context_map_;
@@ -1077,7 +1086,7 @@ public:
 
   // Tracing::TraceContext
   absl::string_view protocol() const override { return header_map_->getProtocolValue(); }
-  absl::string_view authority() const override { return header_map_->getHostValue(); }
+  absl::string_view host() const override { return header_map_->getHostValue(); }
   absl::string_view path() const override { return header_map_->getPathValue(); }
   absl::string_view method() const override { return header_map_->getMethodValue(); }
   void forEach(IterateCallback callback) const override {

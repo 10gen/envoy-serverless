@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 #include "envoy/buffer/buffer.h"
 #include "envoy/config/core/v3/protocol.pb.h"
 #include "envoy/event/dispatcher.h"
@@ -10,6 +12,8 @@
 #include "source/common/quic/envoy_quic_utils.h"
 #include "source/common/quic/quic_filter_manager_connection_impl.h"
 #include "source/common/quic/send_buffer_monitor.h"
+
+#include "quiche/http2/adapter/header_validator.h"
 
 namespace Envoy {
 namespace Quic {
@@ -75,17 +79,19 @@ public:
   void removeCallbacks(Http::StreamCallbacks& callbacks) override {
     removeCallbacksHelper(callbacks);
   }
-  uint32_t bufferLimit() override { return send_buffer_simulation_.highWatermark(); }
-  const Network::Address::InstanceConstSharedPtr& connectionLocalAddress() override {
-    return connection()->connectionInfoProvider().localAddress();
+  uint32_t bufferLimit() const override { return send_buffer_simulation_.highWatermark(); }
+  const Network::ConnectionInfoProvider& connectionInfoProvider() override {
+    return connection()->connectionInfoProvider();
   }
+
+  Buffer::BufferMemoryAccountSharedPtr account() const override { return buffer_memory_account_; }
 
   void setAccount(Buffer::BufferMemoryAccountSharedPtr account) override {
     buffer_memory_account_ = account;
   }
 
   // SendBufferMonitor
-  void updateBytesBuffered(size_t old_buffered_bytes, size_t new_buffered_bytes) override {
+  void updateBytesBuffered(uint64_t old_buffered_bytes, uint64_t new_buffered_bytes) override {
     if (new_buffered_bytes == old_buffered_bytes) {
       return;
     }
@@ -103,7 +109,9 @@ public:
   validateHeader(absl::string_view header_name, absl::string_view header_value) override {
     bool override_stream_error_on_invalid_http_message =
         http3_options_.override_stream_error_on_invalid_http_message().value();
-    if (!Http::HeaderUtility::headerValueIsValid(header_value)) {
+    if (header_validator_.ValidateSingleHeader(header_name, header_value) !=
+        http2::adapter::HeaderValidator::HEADER_OK) {
+      close_connection_upon_invalid_header_ = !override_stream_error_on_invalid_http_message;
       return Http::HeaderUtility::HeaderValidationResult::REJECT;
     }
     if (header_name == "content-length") {
@@ -114,6 +122,14 @@ public:
               close_connection_upon_invalid_header_, content_length);
       content_length_ = content_length;
       return result;
+    }
+    ASSERT(!header_name.empty());
+    if (Http::HeaderUtility::isPseudoHeader(header_name) && saw_regular_headers_) {
+      // If any regular header appears before pseudo headers, the request or response is malformed.
+      return Http::HeaderUtility::HeaderValidationResult::REJECT;
+    }
+    if (!Http::HeaderUtility::isPseudoHeader(header_name)) {
+      saw_regular_headers_ = true;
     }
     return Http::HeaderUtility::HeaderValidationResult::ACCEPT;
   }
@@ -149,6 +165,8 @@ protected:
     }
   }
 
+  StreamInfo::BytesMeterSharedPtr& mutableBytesMeter() { return bytes_meter_; }
+
   // True once end of stream is propagated to Envoy. Envoy doesn't expect to be
   // notified more than once about end of stream. So once this is true, no need
   // to set it in the callback to Envoy stream any more.
@@ -169,6 +187,8 @@ protected:
   Buffer::BufferMemoryAccountSharedPtr buffer_memory_account_ = nullptr;
   bool got_304_response_{false};
   bool sent_head_request_{false};
+  // True if a regular (non-pseudo) HTTP header has been seen before.
+  bool saw_regular_headers_{false};
 
 private:
   // Keeps track of bytes buffered in the stream send buffer in QUICHE and reacts
@@ -189,6 +209,41 @@ private:
   StreamInfo::BytesMeterSharedPtr bytes_meter_{std::make_shared<StreamInfo::BytesMeter>()};
   absl::optional<size_t> content_length_;
   size_t received_content_bytes_{0};
+  http2::adapter::HeaderValidator header_validator_;
+};
+
+// Object used for updating a BytesMeter to track bytes sent on a QuicStream since this object was
+// constructed.
+class IncrementalBytesSentTracker {
+public:
+  IncrementalBytesSentTracker(const quic::QuicStream& stream, StreamInfo::BytesMeter& bytes_meter,
+                              bool update_header_bytes)
+      : stream_(stream), bytes_meter_(bytes_meter), update_header_bytes_(update_header_bytes),
+        initial_bytes_sent_(totalStreamBytesWritten()) {}
+
+  ~IncrementalBytesSentTracker() {
+    if (update_header_bytes_) {
+      bytes_meter_.addHeaderBytesSent(incrementalBytesWritten());
+    }
+    bytes_meter_.addWireBytesSent(incrementalBytesWritten());
+  }
+
+private:
+  // Returns the number of newly sent bytes since the tracker was constructed.
+  uint64_t incrementalBytesWritten() {
+    ASSERT(totalStreamBytesWritten() >= initial_bytes_sent_);
+    return totalStreamBytesWritten() - initial_bytes_sent_;
+  }
+
+  // Returns total number of stream bytes written, including buffered bytes.
+  uint64_t totalStreamBytesWritten() const {
+    return stream_.stream_bytes_written() + stream_.BufferedDataBytes();
+  }
+
+  const quic::QuicStream& stream_;
+  StreamInfo::BytesMeter& bytes_meter_;
+  bool update_header_bytes_;
+  uint64_t initial_bytes_sent_;
 };
 
 } // namespace Quic

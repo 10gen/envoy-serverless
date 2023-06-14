@@ -15,8 +15,7 @@ const ConstSupportedBuckets default_buckets{};
 }
 
 HistogramStatisticsImpl::HistogramStatisticsImpl()
-    : supported_buckets_(default_buckets), computed_quantiles_(supportedQuantiles().size(), 0.0),
-      unit_(Histogram::Unit::Unspecified) {}
+    : supported_buckets_(default_buckets), computed_quantiles_(supportedQuantiles().size(), 0.0) {}
 
 HistogramStatisticsImpl::HistogramStatisticsImpl(const histogram_t* histogram_ptr,
                                                  Histogram::Unit unit,
@@ -29,6 +28,17 @@ HistogramStatisticsImpl::HistogramStatisticsImpl(const histogram_t* histogram_pt
 const std::vector<double>& HistogramStatisticsImpl::supportedQuantiles() const {
   CONSTRUCT_ON_FIRST_USE(std::vector<double>,
                          {0, 0.25, 0.5, 0.75, 0.90, 0.95, 0.99, 0.995, 0.999, 1});
+}
+
+std::vector<uint64_t> HistogramStatisticsImpl::computeDisjointBuckets() const {
+  std::vector<uint64_t> buckets;
+  buckets.reserve(computed_buckets_.size());
+  uint64_t previous_computed_bucket = 0;
+  for (uint64_t computed_bucket : computed_buckets_) {
+    buckets.push_back(computed_bucket - previous_computed_bucket);
+    previous_computed_bucket = computed_bucket;
+  }
+  return buckets;
 }
 
 std::string HistogramStatisticsImpl::quantileSummary() const {

@@ -8,7 +8,7 @@
 #include "source/common/event/dispatcher_impl.h"
 #include "source/common/stats/allocator_impl.h"
 #include "source/common/stats/stats_matcher_impl.h"
-#include "source/common/stats/symbol_table_impl.h"
+#include "source/common/stats/symbol_table.h"
 #include "source/common/stats/tag_producer_impl.h"
 #include "source/common/stats/thread_local_store.h"
 #include "source/common/thread_local/thread_local_impl.h"
@@ -48,8 +48,9 @@ public:
   }
 
   void accessCounters() {
+    Stats::Scope& scope = *store_.rootScope();
     for (auto& stat_name_storage : stat_names_) {
-      store_.counterFromStatName(stat_name_storage->statName());
+      scope.counterFromStatName(stat_name_storage->statName());
     }
   }
 

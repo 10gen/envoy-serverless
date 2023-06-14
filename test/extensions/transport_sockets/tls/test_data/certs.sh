@@ -3,7 +3,8 @@
 set -e
 
 readonly DEFAULT_VALIDITY_DAYS=${DEFAULT_VALIDITY_DAYS:-730}
-readonly HERE=$(cd "$(dirname "$0")" && pwd)
+HERE=$(cd "$(dirname "$0")" && pwd)
+readonly HERE
 
 cd "$HERE" || exit 1
 trap cleanup EXIT
@@ -98,6 +99,36 @@ generate_selfsigned_x509_cert() {
     generate_info_header "$output_prefix"
 }
 
+# $1=<CA name>
+# Generates a chain of 3 intermediate certs in test_long_cert_chain
+# and a cert signed by this in test_random_cert.pem
+generate_cert_chain() {
+    local certname
+    local ca_name="${1}"
+    rm test_long_cert_chain.pem
+    touch test_long_cert_chain.pem
+    for x in {1..4}; do
+        certname="i$x"
+        if [[ $x -gt 1 ]]
+        then
+            ca_name="i$((x - 1))"
+        fi
+        echo "$x: $certname $ca_name"
+        generate_ca $certname $ca_name
+    done
+    for x in {1..3}; do
+        cat "i${x}_cert.pem" >> test_long_cert_chain.pem
+    done
+    mv i4_cert.pem test_random_cert.pem
+
+    # These intermediate files are unnecessary.
+    for x in {1..4}; do
+        rm -f "i${x}_key.pem"
+        rm -f "i${x}_cert.pem"
+        rm -f "i${x}_cert_info.h"
+    done
+}
+
 # Generate ca_cert.pem.
 generate_ca ca
 
@@ -106,6 +137,9 @@ generate_ca intermediate_ca ca
 
 # Concatenate intermediate_ca_cert.pem and ca_cert.pem to create valid certificate chain.
 cat intermediate_ca_cert.pem ca_cert.pem > intermediate_ca_cert_chain.pem
+
+# Generate a cert-chain with 4 intermediate certs
+generate_cert_chain ca
 
 # Generate fake_ca_cert.pem.
 generate_ca fake_ca
@@ -119,6 +153,10 @@ generate_x509_cert no_san ca
 
 # Concatenate no_san_cert.pem and Test Intermediate CA (intermediate_ca_cert.pem) to create valid certificate chain.
 cat no_san_cert.pem intermediate_ca_cert.pem > no_san_chain.pem
+
+# Generate no_san_cn_cert.pem
+generate_rsa_key no_san_cn
+generate_x509_cert no_san_cn ca
 
 # Generate san_dns_cert.pem.
 generate_rsa_key san_dns
@@ -148,13 +186,45 @@ generate_rsa_key san_dns4
 generate_x509_cert san_dns4 intermediate_ca
 rm -f san_dns4_cert.cfg
 
+# Generate san_wildcard_dns_cert.pem
+generate_rsa_key san_wildcard_dns
+generate_x509_cert san_wildcard_dns ca
+
 # Generate san_multiple_dns_cert.pem.
 generate_rsa_key san_multiple_dns
 generate_x509_cert san_multiple_dns ca
 
+# Generate san_multiple_dns_1_cert.pem
+generate_rsa_key san_multiple_dns_1
+generate_x509_cert san_multiple_dns_1 ca
+
 # Generate san_only_dns_cert.pem.
 generate_rsa_key san_only_dns
 generate_x509_cert san_only_dns ca
+
+# Generate san_dns_rsa_1_cert.pem
+cp san_dns_server1_cert.cfg san_dns_rsa_1_cert.cfg
+generate_rsa_key san_dns_rsa_1
+generate_x509_cert san_dns_rsa_1 ca
+rm -f san_dns_rsa_1_cert.cfg
+
+# Generate san_dns_rsa_2_cert.pem
+cp san_dns_server2_cert.cfg san_dns_rsa_2_cert.cfg
+generate_rsa_key san_dns_rsa_2
+generate_x509_cert san_dns_rsa_2 ca
+rm -f san_dns_rsa_2_cert.cfg
+
+# Generate san_dns_ecdsa_1_cert.pem
+cp san_dns_server1_cert.cfg san_dns_ecdsa_1_cert.cfg
+generate_ecdsa_key san_dns_ecdsa_1
+generate_x509_cert san_dns_ecdsa_1 ca
+rm -f san_dns_ecdsa_1_cert.cfg
+
+# Generate san_dns_ecdsa_2_cert.pem
+cp san_dns_server2_cert.cfg san_dns_ecdsa_2_cert.cfg
+generate_ecdsa_key san_dns_ecdsa_2
+generate_x509_cert san_dns_ecdsa_2 ca
+rm -f san_dns_ecdsa_2_cert.cfg
 
 # Generate san_uri_cert.pem.
 generate_rsa_key san_uri

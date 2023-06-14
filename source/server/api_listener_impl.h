@@ -9,8 +9,8 @@
 #include "envoy/network/filter.h"
 #include "envoy/network/socket.h"
 #include "envoy/server/api_listener.h"
-#include "envoy/server/drain_manager.h"
 #include "envoy/server/filter_config.h"
+#include "envoy/server/instance.h"
 #include "envoy/server/listener_manager.h"
 #include "envoy/stats/scope.h"
 
@@ -20,12 +20,10 @@
 #include "source/common/init/manager_impl.h"
 #include "source/common/network/socket_impl.h"
 #include "source/common/stream_info/stream_info_impl.h"
-#include "source/server/filter_chain_manager_impl.h"
+#include "source/server/factory_context_impl.h"
 
 namespace Envoy {
 namespace Server {
-
-class ListenerManagerImpl;
 
 /**
  * Base class all ApiListeners.
@@ -50,8 +48,8 @@ public:
   }
 
 protected:
-  ApiListenerImplBase(const envoy::config::listener::v3::Listener& config,
-                      ListenerManagerImpl& parent, const std::string& name);
+  ApiListenerImplBase(const envoy::config::listener::v3::Listener& config, Server::Instance& server,
+                      const std::string& name);
 
   // Synthetic class that acts as a stub Network::ReadFilterCallbacks.
   // TODO(junr03): if we are able to separate the Network Filter aspects of the
@@ -66,6 +64,10 @@ protected:
     void continueReading() override { IS_ENVOY_BUG("Unexpected call to continueReading"); }
     void injectReadDataToFilterChain(Buffer::Instance&, bool) override {
       IS_ENVOY_BUG("Unexpected call to injectReadDataToFilterChain");
+    }
+    bool startUpstreamSecureTransport() override {
+      IS_ENVOY_BUG("Unexpected call to startUpstreamSecureTransport");
+      return false;
     }
     Upstream::HostDescriptionConstSharedPtr upstreamHost() override { return nullptr; }
     void upstreamHost(Upstream::HostDescriptionConstSharedPtr) override {
@@ -113,11 +115,12 @@ protected:
         IS_ENVOY_BUG("Unexpected function call");
       }
       void enableHalfClose(bool) override { IS_ENVOY_BUG("Unexpected function call"); }
-      bool isHalfCloseEnabled() override {
+      bool isHalfCloseEnabled() const override {
         IS_ENVOY_BUG("Unexpected function call");
         return false;
       }
       void close(Network::ConnectionCloseType) override {}
+      void close(Network::ConnectionCloseType, absl::string_view) override {}
       Event::Dispatcher& dispatcher() override {
         return parent_.parent_.factory_context_.mainThreadDispatcher();
       }
@@ -130,7 +133,10 @@ protected:
         IS_ENVOY_BUG("Unexpected function call");
       }
       bool readEnabled() const override { return true; }
-      const Network::ConnectionInfoSetter& connectionInfoProvider() const override {
+      Network::ConnectionInfoSetter& connectionInfoSetter() override {
+        return *connection_info_provider_;
+      }
+      const Network::ConnectionInfoProvider& connectionInfoProvider() const override {
         return *connection_info_provider_;
       }
       Network::ConnectionInfoProviderSharedPtr connectionInfoProviderSharedPtr() const override {
@@ -156,11 +162,14 @@ protected:
       const StreamInfo::StreamInfo& streamInfo() const override { return stream_info_; }
       void setDelayedCloseTimeout(std::chrono::milliseconds) override {}
       absl::string_view transportFailureReason() const override { return EMPTY_STRING; }
+      absl::string_view localCloseReason() const override { return EMPTY_STRING; }
       bool startSecureTransport() override {
         IS_ENVOY_BUG("Unexpected function call");
         return false;
       }
-      absl::optional<std::chrono::milliseconds> lastRoundTripTime() const override { return {}; };
+      absl::optional<std::chrono::milliseconds> lastRoundTripTime() const override { return {}; }
+      void configureInitialCongestionWindow(uint64_t, std::chrono::microseconds) override {}
+      absl::optional<uint64_t> congestionWindowInBytes() const override { return {}; }
       // ScopeTrackedObject
       void dumpState(std::ostream& os, int) const override { os << "SyntheticConnection"; }
 
@@ -176,11 +185,10 @@ protected:
   };
 
   const envoy::config::listener::v3::Listener& config_;
-  ListenerManagerImpl& parent_;
   const std::string name_;
   Network::Address::InstanceConstSharedPtr address_;
-  Stats::ScopePtr global_scope_;
-  Stats::ScopePtr listener_scope_;
+  Stats::ScopeSharedPtr global_scope_;
+  Stats::ScopeSharedPtr listener_scope_;
   FactoryContextImpl factory_context_;
   SyntheticReadCallbacks read_callbacks_;
 };
@@ -191,7 +199,7 @@ protected:
  */
 class HttpApiListener : public ApiListenerImplBase {
 public:
-  HttpApiListener(const envoy::config::listener::v3::Listener& config, ListenerManagerImpl& parent,
+  HttpApiListener(const envoy::config::listener::v3::Listener& config, Server::Instance& server,
                   const std::string& name);
 
   // ApiListener

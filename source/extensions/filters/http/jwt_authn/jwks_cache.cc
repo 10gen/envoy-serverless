@@ -5,9 +5,11 @@
 
 #include "envoy/common/time.h"
 #include "envoy/extensions/filters/http/jwt_authn/v3/config.pb.h"
+#include "envoy/thread_local/thread_local.h"
 
 #include "source/common/common/logger.h"
 #include "source/common/config/datasource.h"
+#include "source/common/http/utility.h"
 
 #include "absl/container/node_hash_map.h"
 #include "jwt_verify_lib/check_audience.h"
@@ -29,6 +31,25 @@ public:
                CreateJwksFetcherCb fetcher_cb, JwtAuthnFilterStats& stats)
       : jwt_provider_(jwt_provider), time_source_(context.timeSource()),
         tls_(context.threadLocal()) {
+
+    if (jwt_provider_.has_remote_jwks()) {
+      // remote_jwks.retry_policy has an invalid case that could not be validated by the
+      // proto validation annotation. It has to be validated by the code.
+      if (jwt_provider_.remote_jwks().has_retry_policy()) {
+        Http::Utility::validateCoreRetryPolicy(jwt_provider_.remote_jwks().retry_policy());
+      }
+      if (jwt_provider_.remote_jwks().has_cache_duration()) {
+        // Use `durationToMilliseconds` as it has stricter max boundary to the `seconds` value to
+        // avoid overflow.
+        ProtobufWkt::Duration duration_copy(jwt_provider_.remote_jwks().cache_duration());
+        (void)DurationUtil::durationToMilliseconds(duration_copy);
+
+        // remote_jwks.duration is used as: now + remote_jwks.duration.
+        // need to verify twice of its `seconds` value.
+        duration_copy.set_seconds(2 * duration_copy.seconds());
+        (void)DurationUtil::durationToMilliseconds(duration_copy);
+      }
+    }
 
     std::vector<std::string> audiences;
     for (const auto& aud : jwt_provider_.audiences()) {
@@ -127,14 +148,20 @@ public:
   JwksCacheImpl(const JwtAuthentication& config, Server::Configuration::FactoryContext& context,
                 CreateJwksFetcherCb fetcher_fn, JwtAuthnFilterStats& stats)
       : stats_(stats) {
-    for (const auto& it : config.providers()) {
-      const auto& provider = it.second;
+    for (const auto& [name, provider] : config.providers()) {
       auto jwks_data = std::make_unique<JwksDataImpl>(provider, context, fetcher_fn, stats);
       if (issuer_ptr_map_.find(provider.issuer()) == issuer_ptr_map_.end()) {
         issuer_ptr_map_.emplace(provider.issuer(), jwks_data.get());
       }
-      jwks_data_map_.emplace(it.first, std::move(jwks_data));
+      jwks_data_map_.emplace(name, std::move(jwks_data));
     }
+  }
+
+  JwksData* getSingleProvider() override {
+    if (jwks_data_map_.size() == 1) {
+      return jwks_data_map_.begin()->second.get();
+    }
+    return nullptr;
   }
 
   JwksData* findByIssuer(const std::string& issuer) override {
@@ -152,7 +179,7 @@ public:
       return it->second.get();
     }
     // Verifier::innerCreate function makes sure that all provider names are defined.
-    NOT_REACHED_GCOVR_EXCL_LINE;
+    PANIC("unexpected");
   }
 
   JwtAuthnFilterStats& stats() override { return stats_; }

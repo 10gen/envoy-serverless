@@ -14,6 +14,7 @@
 #include "source/common/protobuf/protobuf.h"
 #include "source/common/singleton/const_singleton.h"
 
+#include "absl/status/status.h"
 #include "absl/strings/str_join.h"
 
 // Obtain the value of a wrapped field (e.g. google.protobuf.UInt32Value) if set. Otherwise, return
@@ -116,7 +117,7 @@ uint64_t fractionalPercentDenominatorToInt(
 // @param default_value supplies the default if the field is not present.
 //
 // TODO(anirudhmurali): Recommended to capture and validate NaN values in PGV
-// Issue: https://github.com/envoyproxy/protoc-gen-validate/issues/85
+// Issue: https://github.com/bufbuild/protoc-gen-validate/issues/85
 #define PROTOBUF_PERCENT_TO_ROUNDED_INTEGER_OR_DEFAULT(message, field_name, max_value,             \
                                                        default_value)                              \
   ([](const auto& msg) {                                                                           \
@@ -271,30 +272,51 @@ public:
   /**
    * Checks for use of deprecated fields in message and all sub-messages.
    * @param message message to validate.
-   * @param loader optional a pointer to the runtime loader for live deprecation status.
+   * @param validation_visitor the validation visitor to use.
+   * @param recurse_into_any whether to recurse into Any messages during unexpected checking.
    * @throw ProtoValidationException if deprecated fields are used and listed
    *    in disallowed_features in runtime_features.h
    */
-  static void
-  checkForUnexpectedFields(const Protobuf::Message& message,
-                           ProtobufMessage::ValidationVisitor& validation_visitor,
-                           Runtime::Loader* loader = Runtime::LoaderSingleton::getExisting());
+  static void checkForUnexpectedFields(const Protobuf::Message& message,
+                                       ProtobufMessage::ValidationVisitor& validation_visitor,
+                                       bool recurse_into_any = false);
 
   /**
-   * Validate protoc-gen-validate constraints on a given protobuf.
+   * Perform a PGV check on the entire message tree, recursing into Any messages as needed.
+   */
+  static void recursivePgvCheck(const Protobuf::Message& message);
+
+  /**
+   * Validate protoc-gen-validate constraints on a given protobuf as well as performing
+   * unexpected field validation.
    * Note the corresponding `.pb.validate.h` for the message has to be included in the source file
    * of caller.
    * @param message message to validate.
+   * @param validation_visitor the validation visitor to use.
+   * @param recurse_into_any whether to recurse into Any messages during unexpected checking.
    * @throw ProtoValidationException if the message does not satisfy its type constraints.
    */
   template <class MessageType>
   static void validate(const MessageType& message,
-                       ProtobufMessage::ValidationVisitor& validation_visitor) {
+                       ProtobufMessage::ValidationVisitor& validation_visitor,
+                       bool recurse_into_any = false) {
     // Log warnings or throw errors if deprecated fields or unknown fields are in use.
     if (!validation_visitor.skipValidation()) {
-      checkForUnexpectedFields(message, validation_visitor);
+      checkForUnexpectedFields(message, validation_visitor, recurse_into_any);
     }
 
+    // TODO(mattklein123): This will recurse the message twice, once above and once for PGV. When
+    // we move to always recursing, satisfying the TODO below, we should merge into a single
+    // recursion for performance reasons.
+    if (recurse_into_any) {
+      return recursivePgvCheck(message);
+    }
+
+    // TODO(mattklein123): Now that PGV is capable of doing recursive message checks on abstract
+    // types, we can remove bottom up validation from the entire codebase and only validate
+    // at top level ingestion (bootstrap, discovery response). This is a large change and will be
+    // done as a separate PR. This change will also allow removing templating from most/all of
+    // related functions.
     std::string err;
     if (!Validate(message, &err)) {
       ProtoExceptionUtil::throwProtoValidationException(err, message);
@@ -335,6 +357,18 @@ public:
    * @throw EnvoyException if the message does not unpack.
    */
   static void unpackTo(const ProtobufWkt::Any& any_message, Protobuf::Message& message);
+
+  /**
+   * Convert from google.protobuf.Any to a typed message. This should be used
+   * instead of the inbuilt UnpackTo as it performs validation of results.
+   *
+   * @param any_message source google.protobuf.Any message.
+   * @param message destination to unpack to.
+   *
+   * @return absl::Status
+   */
+  static absl::Status unpackToNoThrow(const ProtobufWkt::Any& any_message,
+                                      Protobuf::Message& message);
 
   /**
    * Convert from google.protobuf.Any to bytes as std::string
@@ -457,25 +491,6 @@ public:
                            bool always_print_primitive_fields = false);
 
   /**
-   * Extract JSON as string from a google.protobuf.Message, crashing if the conversion to JSON
-   * fails. This method is safe so long as the message does not contain an Any proto with an
-   * unrecognized type or invalid data.
-   * @param message message of type type.googleapis.com/google.protobuf.Message.
-   * @param pretty_print whether the returned JSON should be formatted.
-   * @param always_print_primitive_fields whether to include primitive fields set to their default
-   * values, e.g. an int32 set to 0 or a bool set to false.
-   * @return std::string of formatted JSON object.
-   */
-  static std::string getJsonStringFromMessageOrDie(const Protobuf::Message& message,
-                                                   bool pretty_print = false,
-                                                   bool always_print_primitive_fields = false) {
-    auto json_or_error =
-        getJsonStringFromMessage(message, pretty_print, always_print_primitive_fields);
-    RELEASE_ASSERT(json_or_error.ok(), json_or_error.status().ToString());
-    return std::move(json_or_error).value();
-  }
-
-  /**
    * Extract JSON as string from a google.protobuf.Message, returning some error string if the
    * conversion to JSON fails.
    * @param message message of type type.googleapis.com/google.protobuf.Message.
@@ -541,6 +556,12 @@ public:
    * @throw EnvoyException if a conversion error occurs.
    */
   static void wireCast(const Protobuf::Message& src, Protobuf::Message& dst);
+
+  /**
+   * Sanitizes a string to contain only valid UTF-8. Invalid UTF-8 characters will be replaced. If
+   * the input string is valid UTF-8, it will be returned unmodified.
+   */
+  static std::string sanitizeUtf8String(absl::string_view str);
 };
 
 class ValueUtil {

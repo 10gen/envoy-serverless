@@ -101,7 +101,7 @@ std::string CidrRange::asString() const {
 // static
 CidrRange CidrRange::create(InstanceConstSharedPtr address, int length) {
   InstanceConstSharedPtr ptr = truncateIpAddressAndLength(std::move(address), &length);
-  return CidrRange(std::move(ptr), length);
+  return {std::move(ptr), length};
 }
 
 // static
@@ -132,7 +132,7 @@ CidrRange CidrRange::create(const std::string& range) {
       }
     }
   }
-  return CidrRange(nullptr, -1);
+  return {nullptr, -1};
 }
 
 // static
@@ -157,6 +157,7 @@ InstanceConstSharedPtr CidrRange::truncateIpAddressAndLength(InstanceConstShared
     uint32_t ip4 = ntohl(address->ip()->ipv4()->address());
     ip4 &= ~0U << (32 - length);
     sockaddr_in sa4;
+    memset(&sa4, 0, sizeof(sa4));
     sa4.sin_family = AF_INET;
     sa4.sin_port = htons(0);
     sa4.sin_addr.s_addr = htonl(ip4);
@@ -173,6 +174,7 @@ InstanceConstSharedPtr CidrRange::truncateIpAddressAndLength(InstanceConstShared
       return std::make_shared<Ipv6Instance>(uint32_t(0));
     }
     sockaddr_in6 sa6;
+    memset(&sa6, 0, sizeof(sa6));
     sa6.sin6_family = AF_INET6;
     sa6.sin6_port = htons(0);
 
@@ -189,7 +191,7 @@ InstanceConstSharedPtr CidrRange::truncateIpAddressAndLength(InstanceConstShared
     return std::make_shared<Ipv6Instance>(sa6);
   }
   }
-  NOT_REACHED_GCOVR_EXCL_LINE;
+  PANIC_DUE_TO_CORRUPT_ENUM;
 }
 
 IpList::IpList(const Protobuf::RepeatedPtrField<envoy::config::core::v3::CidrRange>& cidrs) {

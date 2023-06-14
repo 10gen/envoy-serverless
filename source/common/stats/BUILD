@@ -62,9 +62,7 @@ envoy_cc_library(
         ":null_counter_lib",
         ":null_gauge_lib",
         ":null_text_readout_lib",
-        ":scope_prefixer_lib",
         ":stats_lib",
-        ":store_impl_lib",
         ":tag_utility_lib",
         "//envoy/stats:stats_macros",
         "//source/common/stats:allocator_lib",
@@ -89,7 +87,6 @@ envoy_cc_library(
     deps = [
         ":symbol_table_lib",
         "//envoy/stats:stats_interface",
-        "//envoy/stats:symbol_table_interface",
         "//source/common/config:well_known_names",
     ],
 )
@@ -134,26 +131,6 @@ envoy_cc_library(
 )
 
 envoy_cc_library(
-    name = "store_impl_lib",
-    hdrs = ["store_impl.h"],
-    deps = [
-        ":symbol_table_lib",
-        "//envoy/stats:stats_interface",
-    ],
-)
-
-envoy_cc_library(
-    name = "scope_prefixer_lib",
-    srcs = ["scope_prefixer.cc"],
-    hdrs = ["scope_prefixer.h"],
-    deps = [
-        ":symbol_table_lib",
-        ":utility_lib",
-        "//envoy/stats:stats_interface",
-    ],
-)
-
-envoy_cc_library(
     name = "stat_merger_lib",
     srcs = ["stat_merger.cc"],
     hdrs = ["stat_merger.h"],
@@ -188,12 +165,14 @@ envoy_cc_library(
 
 envoy_cc_library(
     name = "symbol_table_lib",
-    srcs = ["symbol_table_impl.cc"],
-    hdrs = ["symbol_table_impl.h"],
-    external_deps = ["abseil_base"],
+    srcs = ["symbol_table.cc"],
+    hdrs = ["symbol_table.h"],
+    external_deps = [
+        "abseil_base",
+        "abseil_inlined_vector",
+    ],
     deps = [
         ":recent_lookups_lib",
-        "//envoy/stats:symbol_table_interface",
         "//source/common/common:assert_lib",
         "//source/common/common:mem_block_builder_lib",
         "//source/common/common:minimal_logger_lib",
@@ -254,7 +233,6 @@ envoy_cc_library(
         ":null_counter_lib",
         ":null_gauge_lib",
         ":null_text_readout_lib",
-        ":scope_prefixer_lib",
         ":stats_lib",
         ":stats_matcher_lib",
         ":tag_producer_lib",

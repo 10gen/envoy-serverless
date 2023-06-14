@@ -2,6 +2,7 @@ load(
     "//bazel:envoy_build_system.bzl",
     "envoy_cc_test",
     "envoy_package",
+    "envoy_select_admin_functionality",
     "envoy_sh_test",
 )
 
@@ -53,7 +54,7 @@ envoy_sh_test(
     srcs = ["version_out_test.sh"],
     coverage = False,
     data = [
-        "//:VERSION",
+        "//:VERSION.txt",
         "//bazel:raw_build_id.ldscript",
         "//source/exe:envoy-static",
     ],
@@ -61,7 +62,7 @@ envoy_sh_test(
 
 envoy_cc_test(
     name = "main_common_test",
-    srcs = ["main_common_test.cc"],
+    srcs = envoy_select_admin_functionality(["main_common_test.cc"]),
     data = [
         "//test/config/integration:google_com_proxy_port_0",
     ],
@@ -69,6 +70,7 @@ envoy_cc_test(
         "//source/common/api:api_lib",
         "//source/exe:envoy_main_common_with_core_extensions_lib",
         "//source/exe:platform_impl_lib",
+        "//source/extensions/clusters/logical_dns:logical_dns_cluster_lib",
         "//test/mocks/runtime:runtime_mocks",
         "//test/test_common:contention_lib",
         "//test/test_common:environment_lib",
@@ -99,8 +101,25 @@ envoy_cc_test(
 )
 
 envoy_cc_test(
+    name = "check_extensions_against_registry_test",
+    srcs = ["check_extensions_against_registry_test.cc"],
+    data = [
+        "//source/extensions:extensions_metadata.yaml",
+    ],
+    deps = [
+        "//test/test_common:environment_lib",
+    ] + select({
+        # gcc RBE build has trouble compiling target with all extensions
+        "//bazel:gcc_build": ["//source/exe:envoy_main_common_with_core_extensions_lib"],
+        # This dependency MUST be main_common_lib to meet the purpose of this test
+        "//conditions:default": ["//source/exe:main_common_lib"],
+    }),
+)
+
+envoy_cc_test(
     name = "win32_scm_test",
     srcs = ["win32_scm_test.cc"],
+    coverage = False,
     data = [
         "//source/exe:envoy-static",
         "//test/config/integration:google_com_proxy_port_0",
@@ -121,6 +140,7 @@ envoy_cc_test(
 envoy_cc_test(
     name = "win32_outofproc_main_test",
     srcs = ["win32_outofproc_main_test.cc"],
+    coverage = False,
     data = [
         "//source/exe:envoy-static",
         "//test/config/integration:google_com_proxy_port_0",

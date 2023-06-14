@@ -81,6 +81,15 @@ TEST_F(OptionsImplTest, V1Disallowed) {
   EXPECT_EQ(Server::Mode::Validate, options->mode());
 }
 
+TEST_F(OptionsImplTest, ConcurrencyZeroIsOne) {
+  std::unique_ptr<OptionsImpl> options =
+      createOptionsImpl("envoy --mode validate --concurrency 0 ");
+  EXPECT_EQ(1U, options->concurrency());
+
+  options = createOptionsImpl("envoy --mode init_only");
+  EXPECT_EQ(Server::Mode::InitOnly, options->mode());
+}
+
 TEST_F(OptionsImplTest, All) {
   std::unique_ptr<OptionsImpl> options = createOptionsImpl(
       "envoy --mode validate --concurrency 2 -c hello --admin-address-path path --restart-epoch 0 "
@@ -282,6 +291,42 @@ TEST_F(OptionsImplTest, DefaultParams) {
   EXPECT_FALSE(command_line_options->allow_unknown_static_fields());
   EXPECT_FALSE(command_line_options->reject_unknown_dynamic_fields());
   EXPECT_EQ(0, options->statsTags().size());
+}
+
+TEST_F(OptionsImplTest, DefaultParamsNoConstructorArgs) {
+  std::unique_ptr<OptionsImpl> options = std::make_unique<OptionsImpl>();
+  EXPECT_EQ(std::chrono::seconds(600), options->drainTime());
+  EXPECT_EQ(Server::DrainStrategy::Gradual, options->drainStrategy());
+  EXPECT_EQ(std::chrono::seconds(900), options->parentShutdownTime());
+  EXPECT_EQ("", options->adminAddressPath());
+  EXPECT_EQ(Network::Address::IpVersion::v4, options->localAddressIpVersion());
+  EXPECT_EQ(Server::Mode::Serve, options->mode());
+  EXPECT_EQ("@envoy_domain_socket", options->socketPath());
+  EXPECT_EQ(0, options->socketMode());
+  EXPECT_EQ(0U, options->statsTags().size());
+  EXPECT_FALSE(options->hotRestartDisabled());
+  EXPECT_FALSE(options->cpusetThreadsEnabled());
+
+  // Validate that CommandLineOptions is constructed correctly with default params.
+  Server::CommandLineOptionsPtr command_line_options = options->toCommandLineOptions();
+
+  EXPECT_EQ(600, command_line_options->drain_time().seconds());
+  EXPECT_EQ(900, command_line_options->parent_shutdown_time().seconds());
+  EXPECT_EQ("", command_line_options->admin_address_path());
+  EXPECT_EQ(envoy::admin::v3::CommandLineOptions::v4,
+            command_line_options->local_address_ip_version());
+  EXPECT_EQ(envoy::admin::v3::CommandLineOptions::Serve, command_line_options->mode());
+  EXPECT_EQ("@envoy_domain_socket", command_line_options->socket_path());
+  EXPECT_EQ(0, command_line_options->socket_mode());
+  EXPECT_FALSE(command_line_options->disable_hot_restart());
+  EXPECT_FALSE(command_line_options->cpuset_threads());
+  EXPECT_FALSE(command_line_options->allow_unknown_static_fields());
+  EXPECT_FALSE(command_line_options->reject_unknown_dynamic_fields());
+  EXPECT_EQ(0, options->statsTags().size());
+
+  // This is the only difference between this test and DefaultParams above, as
+  // the DefaultParams constructor explicitly sets log level to warn.
+  EXPECT_EQ(spdlog::level::info, options->logLevel());
 }
 
 // Validates that the server_info proto is in sync with the options.
@@ -600,7 +645,6 @@ class TestFactory : public Config::TypedFactory {
 public:
   ~TestFactory() override = default;
   std::string category() const override { return "test"; }
-  std::string configType() override { return "google.protobuf.StringValue"; }
   ProtobufTypes::MessagePtr createEmptyConfigProto() override {
     return std::make_unique<ProtobufWkt::StringValue>();
   }
@@ -615,64 +659,10 @@ class TestingFactory : public Config::TypedFactory {
 public:
   ~TestingFactory() override = default;
   std::string category() const override { return "testing"; }
-  std::string configType() override { return "google.protobuf.StringValue"; }
   ProtobufTypes::MessagePtr createEmptyConfigProto() override {
     return std::make_unique<ProtobufWkt::StringValue>();
   }
 };
-
-class TestTestingFactory : public TestingFactory {
-public:
-  std::string name() const override { return "test"; }
-};
-
-TEST(DisableExtensions, DEPRECATED_FEATURE_TEST(IsDisabled)) {
-  TestTestFactory testTestFactory;
-  Registry::InjectFactoryCategory<TestFactory> testTestCategory(testTestFactory);
-  Registry::InjectFactory<TestFactory> testTestRegistration(testTestFactory, {"test-1", "test-2"});
-
-  TestTestingFactory testTestingFactory;
-  Registry::InjectFactoryCategory<TestingFactory> testTestingCategory(testTestingFactory);
-  Registry::InjectFactory<TestingFactory> testTestingRegistration(testTestingFactory,
-                                                                  {"test-1", "test-2"});
-
-  EXPECT_LOG_CONTAINS("warning", "failed to disable invalid extension name 'not.a.factory'",
-                      OptionsImpl::disableExtensions({"not.a.factory"}));
-
-  EXPECT_LOG_CONTAINS("warning", "failed to disable unknown extension 'no/such.factory'",
-                      OptionsImpl::disableExtensions({"no/such.factory"}));
-
-  EXPECT_NE(Registry::FactoryRegistry<TestFactory>::getFactory("test"), nullptr);
-  EXPECT_EQ(Registry::FactoryRegistry<TestFactory>::getFactory("test-1"), nullptr);
-  EXPECT_EQ(Registry::FactoryRegistry<TestFactory>::getFactory("test-2"), nullptr);
-  EXPECT_NE(Registry::FactoryRegistry<TestFactory>::getFactoryByType("google.protobuf.StringValue"),
-            nullptr);
-
-  EXPECT_NE(Registry::FactoryRegistry<TestingFactory>::getFactory("test"), nullptr);
-  EXPECT_EQ(Registry::FactoryRegistry<TestingFactory>::getFactory("test-1"), nullptr);
-  EXPECT_EQ(Registry::FactoryRegistry<TestingFactory>::getFactory("test-2"), nullptr);
-
-  OptionsImpl::disableExtensions({"test/test", "testing/test-2"});
-
-  // Simulate the initial construction of the type mappings.
-  testTestRegistration.resetTypeMappings();
-  testTestingRegistration.resetTypeMappings();
-
-  // When we disable an extension, all its aliases should also be disabled.
-  EXPECT_EQ(Registry::FactoryRegistry<TestFactory>::getFactory("test"), nullptr);
-  EXPECT_EQ(Registry::FactoryRegistry<TestFactory>::getFactory("test-1"), nullptr);
-  EXPECT_EQ(Registry::FactoryRegistry<TestFactory>::getFactory("test-2"), nullptr);
-
-  // When we disable an extension, all its aliases should also be disabled.
-  EXPECT_EQ(Registry::FactoryRegistry<TestingFactory>::getFactory("test"), nullptr);
-  EXPECT_EQ(Registry::FactoryRegistry<TestingFactory>::getFactory("test-1"), nullptr);
-  EXPECT_EQ(Registry::FactoryRegistry<TestingFactory>::getFactory("test-2"), nullptr);
-
-  // Typing map for TestingFactory should be constructed here after disabling
-  EXPECT_EQ(
-      Registry::FactoryRegistry<TestingFactory>::getFactoryByType("google.protobuf.StringValue"),
-      nullptr);
-}
 
 } // namespace
 } // namespace Envoy

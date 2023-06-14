@@ -7,6 +7,7 @@
 #include "envoy/config/core/v3/protocol.pb.h"
 #include "envoy/config/route/v3/route_components.pb.h"
 #include "envoy/http/header_map.h"
+#include "envoy/http/header_validator.h"
 #include "envoy/http/protocol.h"
 #include "envoy/type/v3/range.pb.h"
 
@@ -77,6 +78,7 @@ public:
     envoy::type::v3::Int64Range range_;
     Matchers::StringMatcherPtr string_match_;
     const bool invert_match_;
+    const bool treat_missing_as_empty_;
     bool present_;
 
     // HeaderMatcher
@@ -138,6 +140,13 @@ public:
   static bool headerValueIsValid(const absl::string_view header_value);
 
   /**
+   * Validates that a header name is valid, according to RFC 7230, section 3.2.
+   * http://tools.ietf.org/html/rfc7230#section-3.2
+   * @return bool true if the header name is valid, according to the aforementioned RFC.
+   */
+  static bool headerNameIsValid(const absl::string_view header_key);
+
+  /**
    * Checks if header name contains underscore characters.
    * Underscore character is allowed in header names by the RFC-7230 and this check is implemented
    * as a security measure due to systems that treat '_' and '-' as interchangeable. Envoy by
@@ -167,6 +176,14 @@ public:
    */
   static bool isConnectResponse(const RequestHeaderMap* request_headers,
                                 const ResponseHeaderMap& response_headers);
+
+#ifdef ENVOY_ENABLE_HTTP_DATAGRAMS
+  /**
+   * @brief Returns true if the Capsule-Protocol header field (RFC 9297) is set to true. If the
+   * header field is included multiple times, returns false as per RFC 9297.
+   */
+  static bool isCapsuleProtocol(const RequestOrResponseHeaderMap& headers);
+#endif
 
   static bool requestShouldHaveNoBody(const RequestHeaderMap& headers);
 
@@ -229,6 +246,14 @@ public:
    */
   static Http::Status checkRequiredResponseHeaders(const Http::ResponseHeaderMap& headers);
 
+  /* Does a common header check ensuring that header keys and values are valid and do not contain
+   * forbidden characters (e.g. valid HTTP header keys/values should never contain embedded NULLs
+   * or new lines.)
+   * @return Status containing the result. If failed, message includes details on which header key
+   * or value was invalid.
+   */
+  static Http::Status checkValidRequestHeaders(const Http::RequestHeaderMap& headers);
+
   /**
    * Returns true if a header may be safely removed without causing additional
    * problems. Effectively, header names beginning with ":" and the "host" header
@@ -258,8 +283,7 @@ public:
       absl::string_view header_name,
       envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
           headers_with_underscores_action,
-      Stats::Counter& dropped_headers_with_underscores,
-      Stats::Counter& requests_rejected_with_underscores_in_headers);
+      HeaderValidatorStats& stats);
 
   /**
    * Check if header_value represents a valid value for HTTP content-length header.
@@ -271,6 +295,42 @@ public:
   validateContentLength(absl::string_view header_value,
                         bool override_stream_error_on_invalid_http_message,
                         bool& should_close_connection, size_t& content_length_output);
+
+  /**
+   * Parse a comma-separated header string to the individual tokens. Discard empty tokens
+   * and whitespace. Return a vector of the comma-separated tokens.
+   */
+  static std::vector<absl::string_view> parseCommaDelimitedHeader(absl::string_view header_value);
+
+  /**
+   * Return the part of attribute before first ';'-sign. For example,
+   * "foo;bar=1" would return "foo".
+   */
+  static absl::string_view getSemicolonDelimitedAttribute(absl::string_view value);
+
+  /**
+   * Return a new AcceptEncoding header string vector.
+   */
+  static std::string addEncodingToAcceptEncoding(absl::string_view accept_encoding_header,
+                                                 absl::string_view encoding);
+
+  /**
+   * Return `true` if the request is a standard HTTP CONNECT.
+   * HTTP/1 RFC: https://datatracker.ietf.org/doc/html/rfc9110#section-9.3.6
+   * HTTP/2 RFC: https://datatracker.ietf.org/doc/html/rfc9113#section-8.5
+   */
+  static bool isStandardConnectRequest(const Http::RequestHeaderMap& headers);
+
+  /**
+   * Return `true` if the request is an extended HTTP/2 CONNECT.
+   * according to https://datatracker.ietf.org/doc/html/rfc8441#section-4
+   */
+  static bool isExtendedH2ConnectRequest(const Http::RequestHeaderMap& headers);
+
+  /**
+   * Return true if the given header name is a pseudo header.
+   */
+  static bool isPseudoHeader(absl::string_view header_name);
 };
 
 } // namespace Http

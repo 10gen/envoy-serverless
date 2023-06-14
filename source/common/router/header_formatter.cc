@@ -104,7 +104,7 @@ parseMetadataField(absl::string_view params_str, bool upstream = true) {
     if (upstream && stream_info.upstreamInfo()) {
       Upstream::HostDescriptionConstSharedPtr host = stream_info.upstreamInfo()->upstreamHost();
       if (!host) {
-        return std::string();
+        return {};
       }
       metadata = host->metadata().get();
     } else {
@@ -116,7 +116,7 @@ parseMetadataField(absl::string_view params_str, bool upstream = true) {
     if (value->kind_case() == ProtobufWkt::Value::KIND_NOT_SET) {
       // No kind indicates default ProtobufWkt::Value which means namespace or key not
       // found.
-      return std::string();
+      return {};
     }
 
     size_t i = 2;
@@ -127,7 +127,7 @@ parseMetadataField(absl::string_view params_str, bool upstream = true) {
 
       const auto field_it = value->struct_value().fields().find(params[i]);
       if (field_it == value->struct_value().fields().end()) {
-        return std::string();
+        return {};
       }
 
       value = &field_it->second;
@@ -136,7 +136,7 @@ parseMetadataField(absl::string_view params_str, bool upstream = true) {
 
     if (i < params.size()) {
       // Didn't find all the keys.
-      return std::string();
+      return {};
     }
 
     switch (value->kind_case()) {
@@ -153,7 +153,7 @@ parseMetadataField(absl::string_view params_str, bool upstream = true) {
       // Unsupported type or null value.
       ENVOY_LOG_MISC(debug, "unsupported value type for metadata [{}]",
                      absl::StrJoin(params, ", "));
-      return std::string();
+      return {};
     }
   };
 }
@@ -179,21 +179,18 @@ parsePerRequestStateField(absl::string_view param_str) {
   return [param](const Envoy::StreamInfo::StreamInfo& stream_info) -> std::string {
     const Envoy::StreamInfo::FilterState& filter_state = stream_info.filterState();
 
-    // No such value means don't output anything.
-    if (!filter_state.hasDataWithName(param)) {
-      return std::string();
-    }
+    auto typed_state = filter_state.getDataReadOnly<StringAccessor>(param);
 
     // Value exists but isn't string accessible is a contract violation; throw an error.
-    if (!filter_state.hasData<StringAccessor>(param)) {
+    if (typed_state == nullptr) {
       ENVOY_LOG_MISC(debug,
                      "Invalid header information: PER_REQUEST_STATE value \"{}\" "
                      "exists but is not string accessible",
                      param);
-      return std::string();
+      return {};
     }
 
-    return std::string(filter_state.getDataReadOnly<StringAccessor>(param).asString());
+    return std::string(typed_state->asString());
   };
 }
 
@@ -220,7 +217,7 @@ parseRequestHeader(absl::string_view param) {
         return std::string(entry[0]->value().getStringView());
       }
     }
-    return std::string();
+    return {};
   };
 }
 
@@ -239,8 +236,7 @@ StreamInfoHeaderFormatter::FieldExtractor sslConnectionInfoStringHeaderExtractor
 
 } // namespace
 
-StreamInfoHeaderFormatter::StreamInfoHeaderFormatter(absl::string_view field_name, bool append)
-    : append_(append) {
+StreamInfoHeaderFormatter::StreamInfoHeaderFormatter(absl::string_view field_name) {
   if (field_name == "PROTOCOL") {
     field_extractor_ = [](const Envoy::StreamInfo::StreamInfo& stream_info) {
       return Envoy::Formatter::SubstitutionFormatUtils::protocolToStringOrDefault(
@@ -263,8 +259,27 @@ StreamInfoHeaderFormatter::StreamInfoHeaderFormatter(absl::string_view field_nam
       return StreamInfo::Utility::formatDownstreamAddressNoPort(
           *stream_info.downstreamAddressProvider().remoteAddress());
     };
+  } else if (field_name == "DOWNSTREAM_REMOTE_PORT") {
+    field_extractor_ = [](const Envoy::StreamInfo::StreamInfo& stream_info) {
+      return StreamInfo::Utility::formatDownstreamAddressJustPort(
+          *stream_info.downstreamAddressProvider().remoteAddress());
+    };
+  } else if (field_name == "DOWNSTREAM_DIRECT_REMOTE_ADDRESS") {
+    field_extractor_ = [](const Envoy::StreamInfo::StreamInfo& stream_info) {
+      return stream_info.downstreamAddressProvider().directRemoteAddress()->asString();
+    };
+  } else if (field_name == "DOWNSTREAM_DIRECT_REMOTE_ADDRESS_WITHOUT_PORT") {
+    field_extractor_ = [](const Envoy::StreamInfo::StreamInfo& stream_info) {
+      return StreamInfo::Utility::formatDownstreamAddressNoPort(
+          *stream_info.downstreamAddressProvider().directRemoteAddress());
+    };
+  } else if (field_name == "DOWNSTREAM_DIRECT_REMOTE_PORT") {
+    field_extractor_ = [](const Envoy::StreamInfo::StreamInfo& stream_info) {
+      return StreamInfo::Utility::formatDownstreamAddressJustPort(
+          *stream_info.downstreamAddressProvider().directRemoteAddress());
+    };
   } else if (field_name == "DOWNSTREAM_LOCAL_ADDRESS") {
-    field_extractor_ = [](const StreamInfo::StreamInfo& stream_info) {
+    field_extractor_ = [](const Envoy::StreamInfo::StreamInfo& stream_info) {
       return stream_info.downstreamAddressProvider().localAddress()->asString();
     };
   } else if (field_name == "DOWNSTREAM_LOCAL_ADDRESS_WITHOUT_PORT") {
@@ -337,10 +352,75 @@ StreamInfoHeaderFormatter::StreamInfoHeaderFormatter(absl::string_view field_nam
     field_extractor_ = parseSubstitutionFormatField(field_name, formatter_map_);
   } else if (absl::StartsWith(field_name, "DOWNSTREAM_PEER_CERT_V_END")) {
     field_extractor_ = parseSubstitutionFormatField(field_name, formatter_map_);
+  } else if (field_name == "UPSTREAM_LOCAL_ADDRESS") {
+    field_extractor_ = [](const Envoy::StreamInfo::StreamInfo& stream_info) -> std::string {
+      if (!Runtime::runtimeFeatureEnabled("envoy.reloadable_features.correct_remote_address")) {
+        if (stream_info.upstreamInfo().has_value() &&
+            stream_info.upstreamInfo()->upstreamHost()->address()) {
+          return stream_info.upstreamInfo()->upstreamHost()->address()->asString();
+        }
+        return "";
+      }
+      if (stream_info.upstreamInfo().has_value() &&
+          stream_info.upstreamInfo()->upstreamLocalAddress()) {
+        return stream_info.upstreamInfo()->upstreamLocalAddress()->asString();
+      }
+      return "";
+    };
+  } else if (field_name == "UPSTREAM_LOCAL_ADDRESS_WITHOUT_PORT") {
+    field_extractor_ = [](const Envoy::StreamInfo::StreamInfo& stream_info) -> std::string {
+      if (!Runtime::runtimeFeatureEnabled("envoy.reloadable_features.correct_remote_address")) {
+        if (stream_info.upstreamInfo().has_value() &&
+            stream_info.upstreamInfo()->upstreamHost()->address()) {
+          return StreamInfo::Utility::formatDownstreamAddressNoPort(
+              *stream_info.upstreamInfo()->upstreamHost()->address());
+        }
+        return "";
+      }
+      if (stream_info.upstreamInfo().has_value() &&
+          stream_info.upstreamInfo()->upstreamLocalAddress()) {
+        return StreamInfo::Utility::formatDownstreamAddressNoPort(
+            *stream_info.upstreamInfo()->upstreamLocalAddress());
+      }
+      return "";
+    };
+  } else if (field_name == "UPSTREAM_LOCAL_PORT") {
+    field_extractor_ = [](const Envoy::StreamInfo::StreamInfo& stream_info) -> std::string {
+      if (!Runtime::runtimeFeatureEnabled("envoy.reloadable_features.correct_remote_address")) {
+        if (stream_info.upstreamInfo().has_value() &&
+            stream_info.upstreamInfo()->upstreamHost()->address()) {
+          return StreamInfo::Utility::formatDownstreamAddressJustPort(
+              *stream_info.upstreamInfo()->upstreamHost()->address());
+        }
+        return "";
+      }
+      if (stream_info.upstreamInfo().has_value() &&
+          stream_info.upstreamInfo()->upstreamLocalAddress()) {
+        return StreamInfo::Utility::formatDownstreamAddressJustPort(
+            *stream_info.upstreamInfo()->upstreamLocalAddress());
+      }
+      return "";
+    };
   } else if (field_name == "UPSTREAM_REMOTE_ADDRESS") {
     field_extractor_ = [](const Envoy::StreamInfo::StreamInfo& stream_info) -> std::string {
+      if (stream_info.upstreamInfo() && stream_info.upstreamInfo()->upstreamRemoteAddress()) {
+        return stream_info.upstreamInfo()->upstreamRemoteAddress()->asString();
+      }
+      return "";
+    };
+  } else if (field_name == "UPSTREAM_REMOTE_ADDRESS_WITHOUT_PORT") {
+    field_extractor_ = [](const Envoy::StreamInfo::StreamInfo& stream_info) -> std::string {
+      if (stream_info.upstreamInfo() && stream_info.upstreamInfo()->upstreamRemoteAddress()) {
+        return StreamInfo::Utility::formatDownstreamAddressNoPort(
+            *stream_info.upstreamInfo()->upstreamRemoteAddress());
+      }
+      return "";
+    };
+  } else if (field_name == "UPSTREAM_REMOTE_PORT") {
+    field_extractor_ = [](const Envoy::StreamInfo::StreamInfo& stream_info) -> std::string {
       if (stream_info.upstreamInfo() && stream_info.upstreamInfo()->upstreamHost()) {
-        return stream_info.upstreamInfo()->upstreamHost()->address()->asString();
+        return StreamInfo::Utility::formatDownstreamAddressJustPort(
+            *stream_info.upstreamInfo()->upstreamHost()->address());
       }
       return "";
     };

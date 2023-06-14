@@ -18,6 +18,7 @@
 #include "absl/strings/match.h"
 #include "udpa/annotations/sensitive.pb.h"
 #include "udpa/annotations/status.pb.h"
+#include "validate/validate.h"
 #include "xds/annotations/v3/status.pb.h"
 #include "yaml-cpp/yaml.h"
 
@@ -27,7 +28,7 @@ namespace Envoy {
 namespace {
 
 absl::string_view filenameFromPath(absl::string_view full_path) {
-  size_t index = full_path.rfind("/");
+  size_t index = full_path.rfind('/');
   if (index == std::string::npos || index == full_path.size()) {
     return full_path;
   }
@@ -157,7 +158,7 @@ void deprecatedFieldHelper(Runtime::Loader* runtime, bool proto_annotated_as_dep
   const bool runtime_overridden = (warn_default == false && warn_only == true);
 
   std::string with_overridden = fmt::format(
-      error,
+      fmt::runtime(error),
       (runtime_overridden ? "runtime overrides to continue using now fatal-by-default " : ""));
 
   validation_visitor.onDeprecatedField("type " + message.GetTypeName() + " " + with_overridden,
@@ -187,16 +188,15 @@ bool evaluateFractionalPercent(envoy::type::v3::FractionalPercent percent, uint6
 uint64_t fractionalPercentDenominatorToInt(
     const envoy::type::v3::FractionalPercent::DenominatorType& denominator) {
   switch (denominator) {
+    PANIC_ON_PROTO_ENUM_SENTINEL_VALUES;
   case envoy::type::v3::FractionalPercent::HUNDRED:
     return 100;
   case envoy::type::v3::FractionalPercent::TEN_THOUSAND:
     return 10000;
   case envoy::type::v3::FractionalPercent::MILLION:
     return 1000000;
-  default:
-    // Checked by schema.
-    NOT_REACHED_GCOVR_EXCL_LINE;
   }
+  PANIC_DUE_TO_CORRUPT_ENUM
 }
 
 } // namespace ProtobufPercentHelper
@@ -264,6 +264,8 @@ Protobuf::util::Status MessageUtil::loadFromJsonNoThrow(const std::string& json,
   // Let's first try and get a clean parse when checking for unknown fields;
   // this should be the common case.
   options.ignore_unknown_fields = false;
+  // Clear existing values (if any) from the destination message before serialization.
+  message.Clear();
   const auto strict_status = Protobuf::util::JsonStringToMessage(json, &message, options);
   if (strict_status.ok()) {
     // Success, no need to do any extra work.
@@ -373,8 +375,7 @@ public:
                               Runtime::Loader* runtime)
       : validation_visitor_(validation_visitor), runtime_(runtime) {}
 
-  const void* onField(const Protobuf::Message& message, const Protobuf::FieldDescriptor& field,
-                      const void*) override {
+  void onField(const Protobuf::Message& message, const Protobuf::FieldDescriptor& field) override {
     const Protobuf::Reflection* reflection = message.GetReflection();
     absl::string_view filename = filenameFromPath(field.file()->name());
 
@@ -386,7 +387,7 @@ public:
     // If this field is not in use, continue.
     if ((field.is_repeated() && reflection->FieldSize(message, &field) == 0) ||
         (!field.is_repeated() && !reflection->HasField(message, &field))) {
-      return nullptr;
+      return;
     }
 
     const auto& field_status = field.options().GetExtension(xds::annotations::v3::field_status);
@@ -407,10 +408,10 @@ public:
                             absl::StrCat("envoy.deprecated_features:", field.full_name()), warning,
                             message, validation_visitor_);
     }
-    return nullptr;
   }
 
-  void onMessage(const Protobuf::Message& message, const void*) override {
+  void onMessage(const Protobuf::Message& message,
+                 absl::Span<const Protobuf::Message* const> parents, bool) override {
     if (message.GetDescriptor()
             ->options()
             .GetExtension(xds::annotations::v3::message_status)
@@ -434,11 +435,18 @@ public:
     if (!unknown_fields.empty()) {
       std::string error_msg;
       for (int n = 0; n < unknown_fields.field_count(); ++n) {
-        error_msg += absl::StrCat(n > 0 ? ", " : "", unknown_fields.field(n).number());
+        absl::StrAppend(&error_msg, n > 0 ? ", " : "", unknown_fields.field(n).number());
       }
       if (!error_msg.empty()) {
-        validation_visitor_.onUnknownField("type " + message.GetTypeName() +
-                                           " with unknown field set {" + error_msg + "}");
+        validation_visitor_.onUnknownField(
+            fmt::format("type {}({}) with unknown field set {{{}}}", message.GetTypeName(),
+                        !parents.empty()
+                            ? absl::StrJoin(parents, "::",
+                                            [](std::string* out, const Protobuf::Message* const m) {
+                                              absl::StrAppend(out, m->GetTypeName());
+                                            })
+                            : "root",
+                        error_msg));
       }
     }
   }
@@ -452,9 +460,37 @@ private:
 
 void MessageUtil::checkForUnexpectedFields(const Protobuf::Message& message,
                                            ProtobufMessage::ValidationVisitor& validation_visitor,
-                                           Runtime::Loader* runtime) {
+                                           bool recurse_into_any) {
+  Runtime::Loader* runtime = validation_visitor.runtime().has_value()
+                                 ? &validation_visitor.runtime().value().get()
+                                 : nullptr;
   UnexpectedFieldProtoVisitor unexpected_field_visitor(validation_visitor, runtime);
-  ProtobufMessage::traverseMessage(unexpected_field_visitor, message, nullptr);
+  ProtobufMessage::traverseMessage(unexpected_field_visitor, message, recurse_into_any);
+}
+
+namespace {
+
+class PgvCheckVisitor : public ProtobufMessage::ConstProtoVisitor {
+public:
+  void onMessage(const Protobuf::Message& message, absl::Span<const Protobuf::Message* const>,
+                 bool was_any_or_top_level) override {
+    std::string err;
+    // PGV verification is itself recursive up to the point at which it hits an Any message. As
+    // such, to avoid N^2 checking of the tree, we only perform an additional check at the point
+    // at which PGV would have stopped because it does not itself check within Any messages.
+    if (was_any_or_top_level && !pgv::BaseValidator::AbstractCheckMessage(message, &err)) {
+      ProtoExceptionUtil::throwProtoValidationException(err, message);
+    }
+  }
+
+  void onField(const Protobuf::Message&, const Protobuf::FieldDescriptor&) override {}
+};
+
+} // namespace
+
+void MessageUtil::recursivePgvCheck(const Protobuf::Message& message) {
+  PgvCheckVisitor visitor;
+  ProtobufMessage::traverseMessage(visitor, message, true);
 }
 
 std::string MessageUtil::getYamlStringFromMessage(const Protobuf::Message& message,
@@ -526,6 +562,17 @@ void MessageUtil::unpackTo(const ProtobufWkt::Any& any_message, Protobuf::Messag
                                      message.GetDescriptor()->full_name(),
                                      any_message.DebugString()));
   }
+}
+
+absl::Status MessageUtil::unpackToNoThrow(const ProtobufWkt::Any& any_message,
+                                          Protobuf::Message& message) {
+  if (!any_message.UnpackTo(&message)) {
+    return absl::InternalError(absl::StrCat("Unable to unpack as ",
+                                            message.GetDescriptor()->full_name(), ": ",
+                                            any_message.DebugString()));
+  }
+  // Ok Status is returned if `UnpackTo` succeeded.
+  return absl::OkStatus();
 }
 
 void MessageUtil::jsonConvert(const Protobuf::Message& source, ProtobufWkt::Struct& dest) {
@@ -752,6 +799,35 @@ void MessageUtil::wireCast(const Protobuf::Message& src, Protobuf::Message& dst)
   }
 }
 
+std::string MessageUtil::sanitizeUtf8String(absl::string_view input) {
+  if (!Runtime::runtimeFeatureEnabled(
+          "envoy.reloadable_features.service_sanitize_non_utf8_strings")) {
+    return std::string(input);
+  }
+
+  // This returns the original string if it was already valid, and returns a pointer to
+  // `result.data()` if it needed to coerce. The coerced string is always
+  // the same length as the source string.
+  //
+  // Initializing `result` to `input` ensures that `result` is correctly sized to receive the
+  // modified string, or in the case where no modification is needed it already contains the correct
+  // value, so `result` can be returned in both cases.
+  //
+  // The choice of '!' is somewhat arbitrary, but we wanted to avoid any character that has
+  // special semantic meaning in URLs or similar.
+  std::string result(input);
+  const char* sanitized = google::protobuf::internal::UTF8CoerceToStructurallyValid(
+      google::protobuf::StringPiece(input.data(), input.length()), result.data(), '!');
+  ASSERT(sanitized == result.data() || sanitized == input.data());
+
+  // Validate requirement that if the input string is returned from
+  // `UTF8CoerceToStructurallyValid`, no modification was made to result so it still contains the
+  // correct return value.
+  ASSERT(sanitized == result.data() || result == input);
+
+  return result;
+}
+
 ProtobufWkt::Value ValueUtil::loadFromYaml(const std::string& yaml) {
   TRY_ASSERT_MAIN_THREAD { return parseYamlNode(YAML::Load(yaml)); }
   END_TRY
@@ -874,22 +950,34 @@ ProtobufWkt::Value ValueUtil::listValue(const std::vector<ProtobufWkt::Value>& v
 
 namespace {
 
-void validateDuration(const ProtobufWkt::Duration& duration) {
+void validateDuration(const ProtobufWkt::Duration& duration, int64_t max_seconds_value) {
   if (duration.seconds() < 0 || duration.nanos() < 0) {
     throw DurationUtil::OutOfRangeException(
         fmt::format("Expected positive duration: {}", duration.DebugString()));
   }
-  if (duration.nanos() > 999999999 ||
-      duration.seconds() > Protobuf::util::TimeUtil::kDurationMaxSeconds) {
+  if (duration.nanos() > 999999999 || duration.seconds() > max_seconds_value) {
     throw DurationUtil::OutOfRangeException(
         fmt::format("Duration out-of-range: {}", duration.DebugString()));
   }
 }
 
+void validateDuration(const ProtobufWkt::Duration& duration) {
+  validateDuration(duration, Protobuf::util::TimeUtil::kDurationMaxSeconds);
+}
+
+void validateDurationAsMilliseconds(const ProtobufWkt::Duration& duration) {
+  // Apply stricter max boundary to the `seconds` value to avoid overflow.
+  // Note that protobuf internally converts to nanoseconds.
+  // The kMaxInt64Nanoseconds = 9223372036, which is about 300 years.
+  constexpr int64_t kMaxInt64Nanoseconds =
+      std::numeric_limits<int64_t>::max() / (1000 * 1000 * 1000);
+  validateDuration(duration, kMaxInt64Nanoseconds);
+}
+
 } // namespace
 
 uint64_t DurationUtil::durationToMilliseconds(const ProtobufWkt::Duration& duration) {
-  validateDuration(duration);
+  validateDurationAsMilliseconds(duration);
   return Protobuf::util::TimeUtil::DurationToMilliseconds(duration);
 }
 

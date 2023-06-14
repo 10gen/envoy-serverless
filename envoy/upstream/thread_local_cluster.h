@@ -2,6 +2,7 @@
 
 #include "envoy/common/pure.h"
 #include "envoy/http/async_client.h"
+#include "envoy/tcp/async_tcp_client.h"
 #include "envoy/upstream/load_balancer.h"
 #include "envoy/upstream/upstream.h"
 
@@ -22,9 +23,10 @@ public:
    */
   Envoy::Http::ConnectionPool::Cancellable*
   newStream(Http::ResponseDecoder& response_decoder,
-            Envoy::Http::ConnectionPool::Callbacks& callbacks) {
+            Envoy::Http::ConnectionPool::Callbacks& callbacks,
+            const Http::ConnectionPool::Instance::StreamOptions& stream_options) {
     on_new_stream_();
-    return pool_->newStream(response_decoder, callbacks);
+    return pool_->newStream(response_decoder, callbacks, stream_options);
   }
   bool hasActiveConnections() const { return pool_->hasActiveConnections(); };
 
@@ -32,6 +34,9 @@ public:
    * See documentation of Envoy::ConnectionPool::Instance.
    */
   void addIdleCallback(ConnectionPool::Instance::IdleCb cb) { pool_->addIdleCallback(cb); };
+  void drainConnections(ConnectionPool::DrainBehavior drain_behavior) {
+    pool_->drainConnections(drain_behavior);
+  };
 
   Upstream::HostDescriptionConstSharedPtr host() const { return pool_->host(); }
 
@@ -137,6 +142,15 @@ public:
    * owns the client.
    */
   virtual Http::AsyncClient& httpAsyncClient() PURE;
+
+  /**
+   * @param context the optional load balancer context.
+   * @param options the tcp client creation config options.
+   * @return a client that can be used to make async Tcp calls against the given cluster.
+   */
+  virtual Tcp::AsyncTcpClientPtr
+  tcpAsyncClient(LoadBalancerContext* context,
+                 Tcp::AsyncTcpClientOptionsConstSharedPtr options) PURE;
 };
 
 using ThreadLocalClusterOptRef = absl::optional<std::reference_wrapper<ThreadLocalCluster>>;

@@ -310,6 +310,27 @@ public:
   NiceMock<Envoy::StreamInfo::MockStreamInfo> stream_info_;
 };
 
+class RateLimitPolicyEntryIpv6Test : public testing::Test {
+public:
+  void setupTest(const std::string& yaml) {
+    rate_limit_entry_ = std::make_unique<RateLimitPolicyEntryImpl>(
+        parseRateLimitFromV3Yaml(yaml), ProtobufMessage::getStrictValidationVisitor());
+    descriptors_.clear();
+    local_descriptors_.clear();
+    stream_info_.downstream_connection_info_provider_->setRemoteAddress(default_remote_address_);
+    ON_CALL(Const(stream_info_), route()).WillByDefault(testing::Return(route_));
+  }
+
+  std::unique_ptr<RateLimitPolicyEntryImpl> rate_limit_entry_;
+  Http::TestRequestHeaderMapImpl header_;
+  std::shared_ptr<MockRoute> route_{new NiceMock<MockRoute>()};
+  std::vector<Envoy::RateLimit::Descriptor> descriptors_;
+  std::vector<Envoy::RateLimit::LocalDescriptor> local_descriptors_;
+  Network::Address::InstanceConstSharedPtr default_remote_address_{
+      new Network::Address::Ipv6Instance("2001:abcd:ef01:2345:6789:abcd:ef01:234")};
+  NiceMock<Envoy::StreamInfo::MockStreamInfo> stream_info_;
+};
+
 TEST_F(RateLimitPolicyEntryTest, RateLimitPolicyEntryMembers) {
   const std::string yaml = R"EOF(
 stage: 2
@@ -337,6 +358,80 @@ actions:
   EXPECT_THAT(std::vector<Envoy::RateLimit::Descriptor>({{{{"remote_address", "10.0.0.1"}}}}),
               testing::ContainerEq(descriptors_));
   EXPECT_THAT(std::vector<Envoy::RateLimit::LocalDescriptor>({{{{"remote_address", "10.0.0.1"}}}}),
+              testing::ContainerEq(local_descriptors_));
+}
+
+TEST_F(RateLimitPolicyEntryTest, MaskedRemoteAddressIpv4Default) {
+  const std::string yaml = R"EOF(
+actions:
+- masked_remote_address: {}
+  )EOF";
+
+  setupTest(yaml);
+
+  rate_limit_entry_->populateDescriptors(descriptors_, "", header_, stream_info_);
+  rate_limit_entry_->populateLocalDescriptors(local_descriptors_, "", header_, stream_info_);
+  EXPECT_THAT(
+      std::vector<Envoy::RateLimit::Descriptor>({{{{"masked_remote_address", "10.0.0.1/32"}}}}),
+      testing::ContainerEq(descriptors_));
+  EXPECT_THAT(std::vector<Envoy::RateLimit::LocalDescriptor>(
+                  {{{{"masked_remote_address", "10.0.0.1/32"}}}}),
+              testing::ContainerEq(local_descriptors_));
+}
+
+TEST_F(RateLimitPolicyEntryTest, MaskedRemoteAddressIpv4) {
+  const std::string yaml = R"EOF(
+actions:
+- masked_remote_address:
+    v4_prefix_mask_len: 16
+  )EOF";
+
+  setupTest(yaml);
+
+  rate_limit_entry_->populateDescriptors(descriptors_, "", header_, stream_info_);
+  rate_limit_entry_->populateLocalDescriptors(local_descriptors_, "", header_, stream_info_);
+  EXPECT_THAT(
+      std::vector<Envoy::RateLimit::Descriptor>({{{{"masked_remote_address", "10.0.0.0/16"}}}}),
+      testing::ContainerEq(descriptors_));
+  EXPECT_THAT(std::vector<Envoy::RateLimit::LocalDescriptor>(
+                  {{{{"masked_remote_address", "10.0.0.0/16"}}}}),
+              testing::ContainerEq(local_descriptors_));
+}
+
+TEST_F(RateLimitPolicyEntryIpv6Test, MaskedRemoteAddressIpv6Default) {
+  const std::string yaml = R"EOF(
+actions:
+- masked_remote_address: {}
+  )EOF";
+
+  setupTest(yaml);
+
+  rate_limit_entry_->populateDescriptors(descriptors_, "", header_, stream_info_);
+  rate_limit_entry_->populateLocalDescriptors(local_descriptors_, "", header_, stream_info_);
+  EXPECT_THAT(std::vector<Envoy::RateLimit::Descriptor>(
+                  {{{{"masked_remote_address", "2001:abcd:ef01:2345:6789:abcd:ef01:234/128"}}}}),
+              testing::ContainerEq(descriptors_));
+  EXPECT_THAT(std::vector<Envoy::RateLimit::LocalDescriptor>(
+                  {{{{"masked_remote_address", "2001:abcd:ef01:2345:6789:abcd:ef01:234/128"}}}}),
+              testing::ContainerEq(local_descriptors_));
+}
+
+TEST_F(RateLimitPolicyEntryIpv6Test, MaskedRemoteAddressIpv6) {
+  const std::string yaml = R"EOF(
+actions:
+- masked_remote_address:
+    v6_prefix_mask_len: 64
+  )EOF";
+
+  setupTest(yaml);
+
+  rate_limit_entry_->populateDescriptors(descriptors_, "", header_, stream_info_);
+  rate_limit_entry_->populateLocalDescriptors(local_descriptors_, "", header_, stream_info_);
+  EXPECT_THAT(std::vector<Envoy::RateLimit::Descriptor>(
+                  {{{{"masked_remote_address", "2001:abcd:ef01:2345::/64"}}}}),
+              testing::ContainerEq(descriptors_));
+  EXPECT_THAT(std::vector<Envoy::RateLimit::LocalDescriptor>(
+                  {{{{"masked_remote_address", "2001:abcd:ef01:2345::/64"}}}}),
               testing::ContainerEq(local_descriptors_));
 }
 
@@ -761,10 +856,14 @@ filter_metadata:
   EXPECT_TRUE(descriptors_.empty());
   EXPECT_TRUE(local_descriptors_.empty());
 }
-// Tests that no descriptor is generated when both the metadata_key and default_value are empty.
+
+// Tests that no descriptors are generated when both the metadata_key and default_value are empty.
 TEST_F(RateLimitPolicyEntryTest, MetaDataAndDefaultValueEmpty) {
   const std::string yaml = R"EOF(
 actions:
+- generic_key:
+    descriptor_key: fake_key
+    descriptor_value: fake_value
 - metadata:
     descriptor_key: fake_key
     default_value: ""
@@ -790,6 +889,44 @@ filter_metadata:
 
   EXPECT_TRUE(descriptors_.empty());
   EXPECT_TRUE(local_descriptors_.empty());
+}
+
+// Tests that no descriptor is generated when both the metadata_key and default_value are empty,
+// and skip_if_absent is set to true.
+TEST_F(RateLimitPolicyEntryTest, MetaDataAndDefaultValueEmptySkipIfAbsent) {
+  const std::string yaml = R"EOF(
+actions:
+- generic_key:
+    descriptor_key: fake_key
+    descriptor_value: fake_value
+- metadata:
+    descriptor_key: fake_key
+    default_value: ""
+    metadata_key:
+      key: 'envoy.xxx'
+      path:
+      - key: test
+      - key: prop
+    skip_if_absent: true
+  )EOF";
+
+  setupTest(yaml);
+
+  std::string metadata_yaml = R"EOF(
+filter_metadata:
+  envoy.xxx:
+    another_key:
+      prop: ""
+  )EOF";
+
+  TestUtility::loadFromYaml(metadata_yaml, stream_info_.dynamicMetadata());
+  rate_limit_entry_->populateDescriptors(descriptors_, "", header_, stream_info_);
+  rate_limit_entry_->populateLocalDescriptors(local_descriptors_, "", header_, stream_info_);
+
+  EXPECT_THAT(std::vector<Envoy::RateLimit::Descriptor>({{{{"fake_key", "fake_value"}}}}),
+              testing::ContainerEq(descriptors_));
+  EXPECT_THAT(std::vector<Envoy::RateLimit::LocalDescriptor>({{{{"fake_key", "fake_value"}}}}),
+              testing::ContainerEq(local_descriptors_));
 }
 
 TEST_F(RateLimitPolicyEntryTest, MetaDataNonStringNoMatch) {
@@ -841,6 +978,29 @@ actions:
   EXPECT_THAT(std::vector<Envoy::RateLimit::Descriptor>({{{{"header_match", "fake_value"}}}}),
               testing::ContainerEq(descriptors_));
   EXPECT_THAT(std::vector<Envoy::RateLimit::LocalDescriptor>({{{{"header_match", "fake_value"}}}}),
+              testing::ContainerEq(local_descriptors_));
+}
+
+TEST_F(RateLimitPolicyEntryTest, HeaderValueMatchDescriptorKey) {
+  const std::string yaml = R"EOF(
+actions:
+- header_value_match:
+    descriptor_key: fake_key
+    descriptor_value: fake_value
+    headers:
+    - name: x-header-name
+      string_match:
+        exact: test_value
+  )EOF";
+
+  setupTest(yaml);
+  Http::TestRequestHeaderMapImpl header{{"x-header-name", "test_value"}};
+
+  rate_limit_entry_->populateDescriptors(descriptors_, "", header, stream_info_);
+  rate_limit_entry_->populateLocalDescriptors(local_descriptors_, "", header, stream_info_);
+  EXPECT_THAT(std::vector<Envoy::RateLimit::Descriptor>({{{{"fake_key", "fake_value"}}}}),
+              testing::ContainerEq(descriptors_));
+  EXPECT_THAT(std::vector<Envoy::RateLimit::LocalDescriptor>({{{{"fake_key", "fake_value"}}}}),
               testing::ContainerEq(local_descriptors_));
 }
 
@@ -901,6 +1061,115 @@ actions:
 
   setupTest(yaml);
   Http::TestRequestHeaderMapImpl header{{"x-header-name", "test_value"}};
+
+  rate_limit_entry_->populateDescriptors(descriptors_, "", header, stream_info_);
+  rate_limit_entry_->populateLocalDescriptors(local_descriptors_, "", header, stream_info_);
+  EXPECT_TRUE(descriptors_.empty());
+  EXPECT_TRUE(local_descriptors_.empty());
+}
+
+TEST_F(RateLimitPolicyEntryTest, QueryParameterValueMatch) {
+  const std::string yaml = R"EOF(
+actions:
+- query_parameter_value_match:
+    descriptor_value: fake_value
+    query_parameters:
+    - name: x-parameter-name
+      string_match:
+        exact: test_value
+  )EOF";
+
+  setupTest(yaml);
+  Http::TestRequestHeaderMapImpl header{{":path", "/?x-parameter-name=test_value"}};
+
+  rate_limit_entry_->populateDescriptors(descriptors_, "", header, stream_info_);
+  rate_limit_entry_->populateLocalDescriptors(local_descriptors_, "", header, stream_info_);
+  EXPECT_THAT(std::vector<Envoy::RateLimit::Descriptor>({{{{"query_match", "fake_value"}}}}),
+              testing::ContainerEq(descriptors_));
+  EXPECT_THAT(std::vector<Envoy::RateLimit::LocalDescriptor>({{{{"query_match", "fake_value"}}}}),
+              testing::ContainerEq(local_descriptors_));
+}
+
+TEST_F(RateLimitPolicyEntryTest, QueryParameterValueMatchDescriptorKey) {
+  const std::string yaml = R"EOF(
+actions:
+- query_parameter_value_match:
+    descriptor_key: fake_key
+    descriptor_value: fake_value
+    query_parameters:
+    - name: x-parameter-name
+      string_match:
+        exact: test_value
+  )EOF";
+
+  setupTest(yaml);
+  Http::TestRequestHeaderMapImpl header{{":path", "/?x-parameter-name=test_value"}};
+
+  rate_limit_entry_->populateDescriptors(descriptors_, "", header, stream_info_);
+  rate_limit_entry_->populateLocalDescriptors(local_descriptors_, "", header, stream_info_);
+  EXPECT_THAT(std::vector<Envoy::RateLimit::Descriptor>({{{{"fake_key", "fake_value"}}}}),
+              testing::ContainerEq(descriptors_));
+  EXPECT_THAT(std::vector<Envoy::RateLimit::LocalDescriptor>({{{{"fake_key", "fake_value"}}}}),
+              testing::ContainerEq(local_descriptors_));
+}
+
+TEST_F(RateLimitPolicyEntryTest, QueryParameterValueMatchNoMatch) {
+  const std::string yaml = R"EOF(
+actions:
+- query_parameter_value_match:
+    descriptor_value: fake_value
+    query_parameters:
+    - name: x-parameter-name
+      string_match:
+        exact: test_value
+  )EOF";
+
+  setupTest(yaml);
+  Http::TestRequestHeaderMapImpl header{{":path", "/?x-parameter-name=not_same_value"}};
+
+  rate_limit_entry_->populateDescriptors(descriptors_, "", header, stream_info_);
+  rate_limit_entry_->populateLocalDescriptors(local_descriptors_, "", header, stream_info_);
+  EXPECT_TRUE(descriptors_.empty());
+  EXPECT_TRUE(local_descriptors_.empty());
+}
+
+TEST_F(RateLimitPolicyEntryTest, QueryParameterValueMatchExpectNoMatch) {
+  const std::string yaml = R"EOF(
+actions:
+- query_parameter_value_match:
+    descriptor_value: fake_value
+    expect_match: false
+    query_parameters:
+    - name: x-parameter-name
+      string_match:
+        exact: test_value
+  )EOF";
+
+  setupTest(yaml);
+  Http::TestRequestHeaderMapImpl header{{":path", "/?x-parameter-name=not_same_value"}};
+
+  rate_limit_entry_->populateDescriptors(descriptors_, "", header, stream_info_);
+  rate_limit_entry_->populateLocalDescriptors(local_descriptors_, "", header, stream_info_);
+  EXPECT_THAT(std::vector<Envoy::RateLimit::Descriptor>({{{{"query_match", "fake_value"}}}}),
+              testing::ContainerEq(descriptors_));
+  EXPECT_THAT(std::vector<Envoy::RateLimit::LocalDescriptor>({{{{"query_match", "fake_value"}}}}),
+              testing::ContainerEq(local_descriptors_));
+}
+
+TEST_F(RateLimitPolicyEntryTest, QueryParameterValueMatchExpectNoMatchFailed) {
+  const std::string yaml = R"EOF(
+actions:
+- query_parameter_value_match:
+    descriptor_value: fake_value
+    expect_match: false
+    query_parameters:
+    - name: x-parameter-name
+      string_match:
+        exact: test_value
+  )EOF";
+
+  setupTest(yaml);
+  Http::TestRequestHeaderMapImpl header{{":path", "/?x-parameter-name=test_value"}};
 
   rate_limit_entry_->populateDescriptors(descriptors_, "", header, stream_info_);
   rate_limit_entry_->populateLocalDescriptors(local_descriptors_, "", header, stream_info_);
@@ -1065,6 +1334,50 @@ filter_metadata:
   rate_limit_entry_->populateDescriptors(descriptors_, "", header_, stream_info_);
   EXPECT_THAT(std::vector<Envoy::RateLimit::Descriptor>({{{{"generic_key", "limited_fake_key"}}}}),
               testing::ContainerEq(descriptors_));
+}
+
+const std::string RequestHeaderMatchInputDescriptor = R"EOF(
+actions:
+- extension:
+    name: my_header_name
+    typed_config:
+      "@type": type.googleapis.com/envoy.type.matcher.v3.HttpRequestHeaderMatchInput
+      header_name: x-header-name
+  )EOF";
+
+TEST_F(RateLimitPolicyEntryTest, RequestMatchInput) {
+  setupTest(RequestHeaderMatchInputDescriptor);
+  Http::TestRequestHeaderMapImpl header{{"x-header-name", "test_value"}};
+
+  rate_limit_entry_->populateDescriptors(descriptors_, "service_cluster", header, stream_info_);
+  rate_limit_entry_->populateLocalDescriptors(local_descriptors_, "service_cluster", header,
+                                              stream_info_);
+  EXPECT_THAT(std::vector<Envoy::RateLimit::Descriptor>({{{{"my_header_name", "test_value"}}}}),
+              testing::ContainerEq(descriptors_));
+  EXPECT_THAT(
+      std::vector<Envoy::RateLimit::LocalDescriptor>({{{{"my_header_name", "test_value"}}}}),
+      testing::ContainerEq(local_descriptors_));
+}
+
+TEST_F(RateLimitPolicyEntryTest, RequestMatchInputEmpty) {
+  setupTest(RequestHeaderMatchInputDescriptor);
+  Http::TestRequestHeaderMapImpl header{{"x-header-name", ""}};
+
+  rate_limit_entry_->populateDescriptors(descriptors_, "service_cluster", header, stream_info_);
+  rate_limit_entry_->populateLocalDescriptors(local_descriptors_, "service_cluster", header,
+                                              stream_info_);
+  EXPECT_FALSE(descriptors_.empty());
+  EXPECT_FALSE(local_descriptors_.empty());
+}
+
+TEST_F(RateLimitPolicyEntryTest, RequestMatchInputSkip) {
+  setupTest(RequestHeaderMatchInputDescriptor);
+
+  rate_limit_entry_->populateDescriptors(descriptors_, "service_cluster", header_, stream_info_);
+  rate_limit_entry_->populateLocalDescriptors(local_descriptors_, "service_cluster", header_,
+                                              stream_info_);
+  EXPECT_TRUE(descriptors_.empty());
+  EXPECT_TRUE(local_descriptors_.empty());
 }
 
 } // namespace

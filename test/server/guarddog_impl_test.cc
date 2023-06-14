@@ -20,6 +20,7 @@
 #include "test/mocks/event/mocks.h"
 #include "test/mocks/server/watchdog_config.h"
 #include "test/mocks/stats/mocks.h"
+#include "test/server/guarddog_test_interlock.h"
 #include "test/test_common/registry.h"
 #include "test/test_common/simulated_time_system.h"
 #include "test/test_common/test_time.h"
@@ -45,28 +46,6 @@ const int DISABLE_MULTIKILL = 0;
 const int DISABLE_MISS = 1000000;
 const int DISABLE_MEGAMISS = 1000000;
 
-class DebugTestInterlock : public GuardDogImpl::TestInterlockHook {
-public:
-  // GuardDogImpl::TestInterlockHook
-  void signalFromImpl() override {
-    waiting_for_signal_ = false;
-    impl_.notifyAll();
-  }
-
-  void waitFromTest(Thread::MutexBasicLockable& mutex) override
-      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex) {
-    ASSERT(!waiting_for_signal_);
-    waiting_for_signal_ = true;
-    while (waiting_for_signal_) {
-      impl_.wait(mutex);
-    }
-  }
-
-private:
-  Thread::CondVar impl_;
-  bool waiting_for_signal_ = false;
-};
-
 // We want to make sure guard-dog is tested with both simulated time and real
 // time, to ensure that it works in production, and that it works in the context
 // of integration tests which are much easier to control with simulated time.
@@ -85,9 +64,9 @@ protected:
     return std::make_unique<Event::SimulatedTimeSystem>();
   }
 
-  void initGuardDog(Stats::Scope& stats_scope, const Server::Configuration::Watchdog& config) {
-    guard_dog_ = std::make_unique<GuardDogImpl>(stats_scope, config, *api_, "server",
-                                                std::make_unique<DebugTestInterlock>());
+  void initGuardDog(Stats::Store& stats_store, const Server::Configuration::Watchdog& config) {
+    guard_dog_ = std::make_unique<GuardDogImpl>(*stats_store.rootScope(), config, *api_, "server",
+                                                std::make_unique<GuardDogTestInterlock>());
   }
 
   std::unique_ptr<Event::TestTimeSystem> time_system_;
@@ -573,7 +552,7 @@ protected:
           "config": {
             "name": "LogFactory",
             "typed_config": {
-              "@type": "type.googleapis.com/google.protobuf.Empty"
+              "@type": "type.googleapis.com/google.protobuf.Struct"
             }
           },
           "event": "MEGAMISS"
@@ -584,7 +563,7 @@ protected:
           "config": {
             "name": "LogFactory",
             "typed_config": {
-              "@type": "type.googleapis.com/google.protobuf.Empty"
+              "@type": "type.googleapis.com/google.protobuf.Struct"
             }
           },
           "event": "MISS"
@@ -600,7 +579,7 @@ protected:
 
   std::vector<std::string> actions_;
   std::vector<std::string> events_;
-  RecordGuardDogActionFactory<Envoy::ProtobufWkt::Empty> log_factory_;
+  RecordGuardDogActionFactory<Envoy::ProtobufWkt::Struct> log_factory_;
   Registry::InjectFactory<Configuration::GuardDogActionFactory> register_log_factory_;
   AssertGuardDogActionFactory<Envoy::ProtobufWkt::Empty> assert_factory_;
   Registry::InjectFactory<Configuration::GuardDogActionFactory> register_assert_factory_;

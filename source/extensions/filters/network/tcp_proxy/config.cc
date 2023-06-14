@@ -15,7 +15,6 @@ Network::FilterFactoryCb ConfigFactory::createFilterFactoryFromProtoTyped(
     const envoy::extensions::filters::network::tcp_proxy::v3::TcpProxy& proto_config,
     Server::Configuration::FactoryContext& context) {
   ASSERT(!proto_config.stat_prefix().empty());
-  auto _ = Envoy::Router::HeaderParser::configure(proto_config.tunneling_config().headers_to_add());
 
   Envoy::TcpProxy::ConfigSharedPtr filter_config(
       std::make_shared<Envoy::TcpProxy::Config>(proto_config, context));
@@ -28,8 +27,8 @@ Network::FilterFactoryCb ConfigFactory::createFilterFactoryFromProtoTyped(
 /**
  * Static registration for the tcp_proxy filter. @see RegisterFactory.
  */
-REGISTER_FACTORY(ConfigFactory,
-                 Server::Configuration::NamedNetworkFilterConfigFactory){"envoy.tcp_proxy"};
+LEGACY_REGISTER_FACTORY(ConfigFactory, Server::Configuration::NamedNetworkFilterConfigFactory,
+                        "envoy.tcp_proxy");
 
 } // namespace TcpProxy
 } // namespace NetworkFilters

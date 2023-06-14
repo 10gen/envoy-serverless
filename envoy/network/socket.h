@@ -107,6 +107,11 @@ public:
    * @return ja3 fingerprint hash of the downstream connection, if any.
    */
   virtual absl::string_view ja3Hash() const PURE;
+
+  /**
+   * @return roundTripTime of the connection
+   */
+  virtual const absl::optional<std::chrono::milliseconds>& roundTripTime() const PURE;
 };
 
 class ConnectionInfoSetter : public ConnectionInfoProvider {
@@ -148,10 +153,16 @@ public:
   virtual void setConnectionID(uint64_t id) PURE;
 
   /**
+   * @param enable whether to enable or disable setting interface name. While having an interface
+   *               name might be helpful for debugging, it might come at a performance cost.
+   */
+  virtual void enableSettingInterfaceName(const bool enable) PURE;
+
+  /**
    * @param interface_name the name of the network interface used by the local end of the
    *connection.
    **/
-  virtual void setInterfaceName(absl::string_view interface_name) PURE;
+  virtual void maybeSetInterfaceName(IoHandle& io_handle) PURE;
 
   /**
    * @param connection_info sets the downstream ssl connection.
@@ -162,6 +173,11 @@ public:
    * @param JA3 fingerprint.
    */
   virtual void setJA3Hash(const absl::string_view ja3_hash) PURE;
+
+  /**
+   * @param  milliseconds of round trip time of previous connection
+   */
+  virtual void setRoundTripTime(std::chrono::milliseconds round_trip_time) PURE;
 };
 
 using ConnectionInfoSetterSharedPtr = std::shared_ptr<ConnectionInfoSetter>;

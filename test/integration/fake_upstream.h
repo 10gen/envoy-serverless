@@ -36,14 +36,17 @@
 #include "source/common/network/udp_packet_writer_handler_impl.h"
 #include "source/common/stats/isolated_store_impl.h"
 
+#include "test/mocks/protobuf/mocks.h"
+
 #if defined(ENVOY_ENABLE_QUIC)
 #include "source/common/quic/active_quic_listener.h"
 #include "source/common/quic/quic_stat_names.h"
 #endif
 
-#include "source/server/active_raw_udp_listener_config.h"
+#include "source/extensions/listener_managers/listener_manager/active_raw_udp_listener_config.h"
 
 #include "test/mocks/common.h"
+#include "test/mocks/runtime/mocks.h"
 #include "test/test_common/test_time_system.h"
 #include "test/test_common/utility.h"
 
@@ -85,7 +88,7 @@ public:
   void encodeHeaders(const Http::HeaderMap& headers, bool end_stream);
   void encodeData(uint64_t size, bool end_stream);
   void encodeData(Buffer::Instance& data, bool end_stream);
-  void encodeData(absl::string_view data, bool end_stream);
+  void encodeData(std::string data, bool end_stream);
   void encodeTrailers(const Http::HeaderMap& trailers);
   void encodeResetStream();
   void encodeMetadata(const Http::MetadataMapVector& metadata_map_vector);
@@ -138,10 +141,16 @@ public:
   waitForData(Event::Dispatcher& client_dispatcher, absl::string_view body,
               std::chrono::milliseconds timeout = TestUtility::DefaultTimeout);
 
+  using ValidatorFunction = const std::function<bool(const std::string&)>;
   ABSL_MUST_USE_RESULT
-  testing::AssertionResult waitForEndStream(
-      Event::Dispatcher& client_dispatcher,
-      std::chrono::milliseconds timeout = TSAN_TIMEOUT_FACTOR * TestUtility::DefaultTimeout);
+  testing::AssertionResult
+  waitForData(Event::Dispatcher& client_dispatcher, const ValidatorFunction& data_validator,
+              std::chrono::milliseconds timeout = TestUtility::DefaultTimeout);
+
+  ABSL_MUST_USE_RESULT
+  testing::AssertionResult
+  waitForEndStream(Event::Dispatcher& client_dispatcher,
+                   std::chrono::milliseconds timeout = TestUtility::DefaultTimeout);
 
   ABSL_MUST_USE_RESULT
   testing::AssertionResult
@@ -202,7 +211,6 @@ public:
       }
     }
     decodeGrpcFrame(message);
-    ENVOY_LOG(debug, "Received gRPC message: {}", message.DebugString());
     return AssertionSuccess();
   }
 
@@ -211,11 +219,14 @@ public:
   void decodeMetadata(Http::MetadataMapPtr&& metadata_map_ptr) override;
 
   // Http::RequestDecoder
-  void decodeHeaders(Http::RequestHeaderMapPtr&& headers, bool end_stream) override;
+  void decodeHeaders(Http::RequestHeaderMapSharedPtr&& headers, bool end_stream) override;
   void decodeTrailers(Http::RequestTrailerMapPtr&& trailers) override;
   StreamInfo::StreamInfo& streamInfo() override {
     RELEASE_ASSERT(false, "initialize if this is needed");
     return *stream_info_;
+  }
+  std::list<AccessLog::InstanceSharedPtr> accessLogHandlers() override {
+    return access_log_handlers_;
   }
 
   // Http::StreamCallbacks
@@ -235,7 +246,7 @@ public:
 
 protected:
   absl::Mutex lock_;
-  Http::RequestHeaderMapPtr headers_ ABSL_GUARDED_BY(lock_);
+  Http::RequestHeaderMapSharedPtr headers_ ABSL_GUARDED_BY(lock_);
   Buffer::OwnedImpl body_ ABSL_GUARDED_BY(lock_);
   FakeHttpConnection& parent_;
 
@@ -250,7 +261,8 @@ private:
   Event::TestTimeSystem& time_system_;
   Http::MetadataMap metadata_map_;
   absl::node_hash_map<std::string, uint64_t> duplicated_metadata_key_count_;
-  std::unique_ptr<StreamInfo::StreamInfo> stream_info_;
+  std::shared_ptr<StreamInfo::StreamInfo> stream_info_;
+  std::list<AccessLog::InstanceSharedPtr> access_log_handlers_;
   bool received_data_{false};
   bool grpc_stream_started_{false};
 };
@@ -401,11 +413,18 @@ public:
     absl::MutexLock lock(&lock_);
     initialized_ = true;
   }
+
+  // Some upstream connection are supposed to be alive forever.
+  ABSL_MUST_USE_RESULT
+  testing::AssertionResult virtual waitForNoPost(
+      std::chrono::milliseconds timeout = TestUtility::DefaultTimeout);
+
   // The same caveats apply here as in SharedConnectionWrapper::connection().
   Network::Connection& connection() const { return shared_connection_.connection(); }
   bool connected() const { return shared_connection_.connected(); }
 
   void postToConnectionThread(std::function<void()> cb);
+  SharedConnectionWrapper& sharedConnection() { return shared_connection_; }
 
 protected:
   FakeConnectionBase(SharedConnectionWrapper& shared_connection, Event::TestTimeSystem& time_system)
@@ -463,9 +482,16 @@ public:
   // Should only be called for HTTP2 or above, sends a GOAWAY frame with ENHANCE_YOUR_CALM.
   void encodeProtocolError();
 
-  // Update the maximum number of concurrent streams. This is currently only
-  // supported for HTTP/3
+  // Update the maximum number of concurrent streams.
   void updateConcurrentStreams(uint64_t max_streams);
+
+  ABSL_MUST_USE_RESULT
+  testing::AssertionResult
+  waitForInexactRawData(const char* data, std::string* out = nullptr,
+                        std::chrono::milliseconds timeout = TestUtility::DefaultTimeout);
+
+  void writeRawData(absl::string_view data);
+  ABSL_MUST_USE_RESULT AssertionResult postWriteRawData(std::string data);
 
 private:
   struct ReadFilter : public Network::ReadFilterBaseImpl {
@@ -543,10 +569,21 @@ public:
     };
   }
 
+  // Creates a ValidatorFunction which returns true when data_to_wait_for
+  // equals the incoming data string.
+  static ValidatorFunction waitForMatch(const char* data_to_wait_for) {
+    return [data_to_wait_for](const std::string& data) -> bool { return data == data_to_wait_for; };
+  }
+
   // Creates a ValidatorFunction which returns true when data_to_wait_for is
   // contains at least bytes_read bytes.
   static ValidatorFunction waitForAtLeastBytes(uint32_t bytes) {
     return [bytes](const std::string& data) -> bool { return data.size() >= bytes; };
+  }
+
+  void clearData() {
+    absl::MutexLock lock(&lock_);
+    data_.clear();
   }
 
 private:
@@ -560,7 +597,7 @@ private:
   };
 
   std::string data_ ABSL_GUARDED_BY(lock_);
-  std::weak_ptr<Network::ReadFilter> read_filter_;
+  std::shared_ptr<Network::ReadFilter> read_filter_;
 };
 
 using FakeRawConnectionPtr = std::unique_ptr<FakeRawConnection>;
@@ -599,10 +636,11 @@ class FakeUpstream : Logger::Loggable<Logger::Id::testing>,
                      public Network::FilterChainFactory {
 public:
   // Creates a fake upstream bound to the specified unix domain socket path.
-  FakeUpstream(const std::string& uds_path, const FakeUpstreamConfig& config);
+  FakeUpstream(Network::DownstreamTransportSocketFactoryPtr&& transport_socket_factory,
+               const std::string& uds_path, const FakeUpstreamConfig& config);
 
   // Creates a fake upstream bound to the specified |address|.
-  FakeUpstream(Network::TransportSocketFactoryPtr&& transport_socket_factory,
+  FakeUpstream(Network::DownstreamTransportSocketFactoryPtr&& transport_socket_factory,
                const Network::Address::InstanceConstSharedPtr& address,
                const FakeUpstreamConfig& config);
 
@@ -610,8 +648,9 @@ public:
   FakeUpstream(uint32_t port, Network::Address::IpVersion version,
                const FakeUpstreamConfig& config);
 
-  FakeUpstream(Network::TransportSocketFactoryPtr&& transport_socket_factory, uint32_t port,
-               Network::Address::IpVersion version, const FakeUpstreamConfig& config);
+  FakeUpstream(Network::DownstreamTransportSocketFactoryPtr&& transport_socket_factory,
+               uint32_t port, Network::Address::IpVersion version,
+               const FakeUpstreamConfig& config);
   ~FakeUpstream() override;
 
   Http::CodecType httpType() { return http_type_; }
@@ -623,12 +662,18 @@ public:
                         std::chrono::milliseconds timeout = TestUtility::DefaultTimeout);
 
   ABSL_MUST_USE_RESULT
+  testing::AssertionResult assertPendingConnectionsEmpty();
+
+  ABSL_MUST_USE_RESULT
   testing::AssertionResult
   waitForRawConnection(FakeRawConnectionPtr& connection,
                        std::chrono::milliseconds timeout = TestUtility::DefaultTimeout);
   Network::Address::InstanceConstSharedPtr localAddress() const {
     return socket_->connectionInfoProvider().localAddress();
   }
+
+  void convertFromRawToHttp(FakeRawConnectionPtr& raw_connection,
+                            FakeHttpConnectionPtr& connection);
 
   virtual std::unique_ptr<FakeRawConnection>
   makeRawConnection(SharedConnectionWrapper& shared_connection,
@@ -655,7 +700,8 @@ public:
                        const Network::Address::InstanceConstSharedPtr& peer);
 
   // Network::FilterChainManager
-  const Network::FilterChain* findFilterChain(const Network::ConnectionSocket&) const override {
+  const Network::FilterChain* findFilterChain(const Network::ConnectionSocket&,
+                                              const StreamInfo::StreamInfo&) const override {
     return filter_chain_.get();
   }
 
@@ -668,6 +714,7 @@ public:
                                     Network::UdpReadFilterCallbacks& callbacks) override;
 
   void setReadDisableOnNewConnection(bool value) { read_disable_on_new_connection_ = value; }
+  void setDisableAllAndDoNotEnable(bool value) { disable_and_do_not_enable_ = value; }
   Event::TestTimeSystem& timeSystem() { return time_system_; }
 
   // Stops the dispatcher loop and joins the listening thread.
@@ -696,13 +743,14 @@ public:
   const envoy::config::core::v3::Http3ProtocolOptions& http3Options() { return http3_options_; }
 
   Event::DispatcherPtr& dispatcher() { return dispatcher_; }
+  absl::Mutex& lock() { return lock_; }
 
 protected:
   Stats::IsolatedStoreImpl stats_store_;
   const Http::CodecType http_type_;
 
 private:
-  FakeUpstream(Network::TransportSocketFactoryPtr&& transport_socket_factory,
+  FakeUpstream(Network::DownstreamTransportSocketFactoryPtr&& transport_socket_factory,
                Network::SocketPtr&& connection, const FakeUpstreamConfig& config);
 
   class FakeListenSocketFactory : public Network::ListenSocketFactory {
@@ -750,7 +798,8 @@ private:
       // Network::UdpListenerConfig
       Network::ActiveUdpListenerFactory& listenerFactory() override { return *listener_factory_; }
       Network::UdpPacketWriterFactory& packetWriterFactory() override { return *writer_factory_; }
-      Network::UdpListenerWorkerRouter& listenerWorkerRouter() override {
+      Network::UdpListenerWorkerRouter&
+      listenerWorkerRouter(const Network::Address::Instance&) override {
         return listener_worker_router_;
       }
       const envoy::config::listener::v3::UdpListenerConfig& config() override { return config_; }
@@ -766,7 +815,8 @@ private:
       if (is_quic) {
 #if defined(ENVOY_ENABLE_QUIC)
         udp_listener_config_.listener_factory_ = std::make_unique<Quic::ActiveQuicListenerFactory>(
-            parent_.quic_options_, 1, parent_.quic_stat_names_);
+            parent_.quic_options_, 1, parent_.quic_stat_names_, parent_.validation_visitor_,
+            absl::nullopt);
         // Initialize QUICHE flags.
         quiche::FlagRegistry::getInstance();
 #else
@@ -784,22 +834,22 @@ private:
     // Network::ListenerConfig
     Network::FilterChainManager& filterChainManager() override { return parent_; }
     Network::FilterChainFactory& filterChainFactory() override { return parent_; }
-    Network::ListenSocketFactory& listenSocketFactory() override {
-      return *parent_.socket_factory_;
+    std::vector<Network::ListenSocketFactoryPtr>& listenSocketFactories() override {
+      return parent_.socket_factories_;
     }
-    bool bindToPort() override { return true; }
+    bool bindToPort() const override { return true; }
     bool handOffRestoredDestinationConnections() const override { return false; }
     uint32_t perConnectionBufferLimitBytes() const override { return 0; }
     std::chrono::milliseconds listenerFiltersTimeout() const override { return {}; }
     bool continueOnListenerFiltersTimeout() const override { return false; }
-    Stats::Scope& listenerScope() override { return parent_.stats_store_; }
+    Stats::Scope& listenerScope() override { return *parent_.stats_store_.rootScope(); }
     uint64_t listenerTag() const override { return 0; }
     const std::string& name() const override { return name_; }
     Network::UdpListenerConfigOptRef udpListenerConfig() override { return udp_listener_config_; }
-    Network::InternalListenerConfigOptRef internalListenerConfig() override {
-      return Network::InternalListenerConfigOptRef();
+    Network::InternalListenerConfigOptRef internalListenerConfig() override { return {}; }
+    Network::ConnectionBalancer& connectionBalancer(const Network::Address::Instance&) override {
+      return connection_balancer_;
     }
-    Network::ConnectionBalancer& connectionBalancer() override { return connection_balancer_; }
     envoy::config::core::v3::TrafficDirection direction() const override {
       return envoy::config::core::v3::UNSPECIFIED;
     }
@@ -835,7 +885,7 @@ private:
   const envoy::config::core::v3::Http3ProtocolOptions http3_options_;
   envoy::config::listener::v3::QuicProtocolOptions quic_options_;
   Network::SocketSharedPtr socket_;
-  Network::ListenSocketFactoryPtr socket_factory_;
+  std::vector<Network::ListenSocketFactoryPtr> socket_factories_;
   ConditionalInitializer server_initialized_;
   // Guards any objects which can be altered both in the upstream thread and the
   // main test thread.
@@ -846,6 +896,7 @@ private:
   Event::DispatcherPtr dispatcher_;
   Network::ConnectionHandlerPtr handler_;
   std::list<SharedConnectionWrapperPtr> new_connections_ ABSL_GUARDED_BY(lock_);
+  testing::NiceMock<Runtime::MockLoader> runtime_;
 
   // When a QueuedConnectionWrapper is popped from new_connections_, ownership is transferred to
   // consumed_connections_. This allows later the Connection destruction (when the FakeUpstream is
@@ -853,15 +904,20 @@ private:
   std::list<SharedConnectionWrapperPtr> consumed_connections_ ABSL_GUARDED_BY(lock_);
   std::list<FakeHttpConnectionPtr> quic_connections_ ABSL_GUARDED_BY(lock_);
   const FakeUpstreamConfig config_;
+  // Normally connections are read disabled until a fake raw or http connection
+  // is created, and are then read enabled. Setting these true skips both these.
   bool read_disable_on_new_connection_;
+  // Setting this true disables all events and does not re-enable as the above does.
+  bool disable_and_do_not_enable_{};
   const bool enable_half_close_;
   FakeListener listener_;
   const Network::FilterChainSharedPtr filter_chain_;
   std::list<Network::UdpRecvData> received_datagrams_ ABSL_GUARDED_BY(lock_);
-  Stats::ScopePtr stats_scope_;
+  Stats::ScopeSharedPtr stats_scope_;
   Http::Http1::CodecStats::AtomicPtr http1_codec_stats_;
   Http::Http2::CodecStats::AtomicPtr http2_codec_stats_;
   Http::Http3::CodecStats::AtomicPtr http3_codec_stats_;
+  testing::NiceMock<ProtobufMessage::MockValidationVisitor> validation_visitor_;
 #ifdef ENVOY_ENABLE_QUIC
   Quic::QuicStatNames quic_stat_names_ = Quic::QuicStatNames(stats_store_.symbolTable());
 #endif

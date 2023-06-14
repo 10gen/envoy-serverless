@@ -9,8 +9,8 @@ at the expense of higher CPU load or offloading it to a compression accelerator.
 
 Configuration
 -------------
+* This filter should be configured with the type URL ``type.googleapis.com/envoy.extensions.filters.http.compressor.v3.Compressor``.
 * :ref:`v3 API reference <envoy_v3_api_msg_extensions.filters.http.compressor.v3.Compressor>`
-* This filter should be configured with the name *envoy.filters.http.compressor*.
 
 How it works
 ------------
@@ -19,8 +19,9 @@ determine whether or not the content should be compressed. The content is
 compressed and then sent to the client with the appropriate headers, if
 response and request allow.
 
-Currently the filter supports :ref:`gzip <envoy_v3_api_msg_extensions.compression.gzip.compressor.v3.Gzip>`
-and :ref:`brotli <envoy_v3_api_msg_extensions.compression.brotli.compressor.v3.Brotli>`
+Currently the filter supports :ref:`gzip <envoy_v3_api_msg_extensions.compression.gzip.compressor.v3.Gzip>`,
+:ref:`brotli <envoy_v3_api_msg_extensions.compression.brotli.compressor.v3.Brotli>`
+and :ref:`zstd <envoy_v3_api_msg_extensions.compression.zstd.compressor.v3.Zstd>`
 compression only. Other compression libraries can be supported as extensions.
 
 An example configuration of the filter may look like the following:
@@ -110,6 +111,34 @@ When request compression is *applied*:
 - *content-encoding* with the compression scheme used (e.g., ``gzip``) is added to
   request headers.
 
+Per-Route Configuration
+-----------------------
+
+Response compression can be enabled and disabled on individual virtual hosts and routes.
+For example, to disable response compression for a particular virtual host, but enable response compression for its ``/static`` route:
+
+.. code-block:: yaml
+
+  route_config:
+    name: local_route
+    virtual_hosts:
+    - name: local_service
+      domains: ["*"]
+      typed_per_filter_config:
+        envoy.filters.http.compression:
+          "@type": type.googleapis.com/envoy.extensions.filters.http.compressor.v3.CompressorPerRoute
+            disabled: true
+      routes:
+      - match: { prefix: "/static" }
+        route: { cluster: some_service }
+        typed_per_filter_config:
+          envoy.filters.http.compression:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.compressor.v3.CompressorPerRoute
+          overrides:
+            response_direction_config:
+      - match: { prefix: "/" }
+        route: { cluster: some_service }
+
 Using different compressors for requests and responses
 --------------------------------------------------------
 
@@ -196,7 +225,7 @@ specific to responses only:
 .. attention:
 
    In case the compressor is not configured to compress responses with the field
-   `response_direction_config` of the :ref:`Compressor <envoy_v3_api_msg_extensions.filters.http.compressor.v3.Compressor>`
+   ``response_direction_config`` of the :ref:`Compressor <envoy_v3_api_msg_extensions.filters.http.compressor.v3.Compressor>`
    message the stats are rooted in the legacy tree
-   <stat_prefix>.compressor.<compressor_library.name>.<compressor_library_stat_prefix>.*, that is without
+   ``<stat_prefix>.compressor.<compressor_library.name>.<compressor_library_stat_prefix>.*``, that is without
    the direction prefix.

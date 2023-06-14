@@ -1,5 +1,6 @@
 #include "envoy/config/core/v3/base.pb.h"
 #include "envoy/config/endpoint/v3/endpoint.pb.h"
+#include "envoy/config/xds_config_tracker.h"
 #include "envoy/service/discovery/v3/discovery.pb.h"
 
 #include "source/common/buffer/zero_copy_input_stream_impl.h"
@@ -10,6 +11,8 @@
 namespace Envoy {
 namespace Config {
 namespace {
+
+using ::testing::Return;
 
 class DeltaSubscriptionImplTest : public DeltaSubscriptionTestHarness,
                                   public testing::TestWithParam<LegacyOrUnified> {
@@ -129,7 +132,7 @@ INSTANTIATE_TEST_SUITE_P(DeltaSubscriptionNoGrpcStreamTest, DeltaSubscriptionNoG
 
 TEST_P(DeltaSubscriptionNoGrpcStreamTest, NoGrpcStream) {
   Stats::IsolatedStoreImpl stats_store;
-  SubscriptionStats stats(Utility::generateStats(stats_store));
+  SubscriptionStats stats(Utility::generateStats(*stats_store.rootScope()));
 
   envoy::config::core::v3::Node node;
   node.set_id("fo0");
@@ -140,21 +143,29 @@ TEST_P(DeltaSubscriptionNoGrpcStreamTest, NoGrpcStream) {
   NiceMock<Random::MockRandomGenerator> random;
   Envoy::Config::RateLimitSettings rate_limit_settings;
   NiceMock<Config::MockSubscriptionCallbacks> callbacks;
-  NiceMock<Config::MockOpaqueResourceDecoder> resource_decoder;
+  OpaqueResourceDecoderSharedPtr resource_decoder(
+      std::make_shared<NiceMock<Config::MockOpaqueResourceDecoder>>());
   auto* async_client = new Grpc::MockAsyncClient();
 
   const Protobuf::MethodDescriptor* method_descriptor =
       Protobuf::DescriptorPool::generated_pool()->FindMethodByName(
           "envoy.service.endpoint.v3.EndpointDiscoveryService.StreamEndpoints");
   GrpcMuxSharedPtr xds_context;
+  auto backoff_strategy = std::make_unique<JitteredExponentialBackOffStrategy>(
+      SubscriptionFactory::RetryInitialDelayMs, SubscriptionFactory::RetryMaxDelayMs, random);
+
   if (GetParam() == LegacyOrUnified::Unified) {
     xds_context = std::make_shared<Config::XdsMux::GrpcMuxDelta>(
         std::unique_ptr<Grpc::MockAsyncClient>(async_client), dispatcher, *method_descriptor,
-        random, stats_store, rate_limit_settings, local_info, false);
+        random, *stats_store.rootScope(), rate_limit_settings, local_info, false,
+        std::make_unique<NiceMock<MockCustomConfigValidators>>(), std::move(backoff_strategy),
+        /*xds_config_tracker=*/XdsConfigTrackerOptRef());
   } else {
     xds_context = std::make_shared<NewGrpcMuxImpl>(
         std::unique_ptr<Grpc::MockAsyncClient>(async_client), dispatcher, *method_descriptor,
-        random, stats_store, rate_limit_settings, local_info);
+        random, *stats_store.rootScope(), rate_limit_settings, local_info,
+        std::make_unique<NiceMock<MockCustomConfigValidators>>(), std::move(backoff_strategy),
+        /*xds_config_tracker=*/XdsConfigTrackerOptRef());
   }
 
   GrpcSubscriptionImplPtr subscription = std::make_unique<GrpcSubscriptionImpl>(

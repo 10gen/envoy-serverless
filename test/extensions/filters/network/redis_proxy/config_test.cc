@@ -81,7 +81,7 @@ settings:
   NiceMock<Server::Configuration::MockFactoryContext> context;
   RedisProxyFilterConfigFactory factory;
   Network::FilterFactoryCb cb = factory.createFilterFactoryFromProto(proto_config, context);
-  EXPECT_TRUE(factory.isTerminalFilterByProto(proto_config, context));
+  EXPECT_TRUE(factory.isTerminalFilterByProto(proto_config, context.getServerFactoryContext()));
   Network::MockConnection connection;
   EXPECT_CALL(connection, addReadFilter(_));
   cb(connection);
@@ -142,21 +142,10 @@ settings:
   NiceMock<Server::Configuration::MockFactoryContext> context;
   RedisProxyFilterConfigFactory factory;
   Network::FilterFactoryCb cb = factory.createFilterFactoryFromProto(proto_config, context);
-  EXPECT_TRUE(factory.isTerminalFilterByProto(proto_config, context));
+  EXPECT_TRUE(factory.isTerminalFilterByProto(proto_config, context.getServerFactoryContext()));
   Network::MockConnection connection;
   EXPECT_CALL(connection, addReadFilter(_));
   cb(connection);
-}
-
-// Test that the deprecated extension name is disabled by default.
-// TODO(zuercher): remove when envoy.deprecated_features.allow_deprecated_extension_names is removed
-TEST(RedisProxyFilterConfigFactoryTest, DEPRECATED_FEATURE_TEST(DeprecatedExtensionFilterName)) {
-  const std::string deprecated_name = "envoy.redis_proxy";
-
-  ASSERT_EQ(
-      nullptr,
-      Registry::FactoryRegistry<Server::Configuration::NamedNetworkFilterConfigFactory>::getFactory(
-          deprecated_name));
 }
 
 } // namespace RedisProxy

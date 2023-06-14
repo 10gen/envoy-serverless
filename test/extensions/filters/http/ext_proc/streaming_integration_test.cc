@@ -31,7 +31,7 @@ static const uint32_t BufferSize = 100000;
 // for the external processor. This lets us more fully exercise all the things that happen
 // with larger, streamed payloads.
 class StreamingIntegrationTest : public HttpIntegrationTest,
-                                 public Grpc::GrpcClientIntegrationParamTest {
+                                 public Grpc::GrpcClientIntegrationParamTestWithDeferredProcessing {
 
 protected:
   StreamingIntegrationTest() : HttpIntegrationTest(Http::CodecType::HTTP2, ipVersion()) {}
@@ -80,11 +80,15 @@ protected:
       envoy::config::listener::v3::Filter ext_proc_filter;
       ext_proc_filter.set_name("envoy.filters.http.ext_proc");
       ext_proc_filter.mutable_typed_config()->PackFrom(proto_config_);
-      config_helper_.prependFilter(MessageUtil::getJsonStringFromMessageOrDie(ext_proc_filter));
+      config_helper_.prependFilter(MessageUtil::getJsonStringFromMessageOrError(ext_proc_filter));
     });
 
     // Make sure that we have control over when buffers will fill up.
     config_helper_.setBufferLimits(BufferSize, BufferSize);
+    // Parameterize with defer processing to prevent bit rot as filter made
+    // assumptions of data flow, prior relying on eager processing.
+    config_helper_.addRuntimeOverride(Runtime::defer_processing_backedup_streams,
+                                      deferredProcessing() ? "true" : "false");
 
     setUpstreamProtocol(Http::CodecType::HTTP2);
     setDownstreamProtocol(Http::CodecType::HTTP2);
@@ -117,14 +121,16 @@ protected:
                                     absl::optional<std::function<void(Http::HeaderMap&)>> cb) {
     auto& encoder = sendClientRequestHeaders(cb);
     Buffer::OwnedImpl post_body;
-    for (uint32_t i = 0; i < num_chunks; i++) {
+    for (uint32_t i = 0; i < num_chunks && codec_client_->streamOpen(); i++) {
       Buffer::OwnedImpl chunk;
       TestUtility::feedBufferWithRandomCharacters(chunk, chunk_size);
       post_body.add(chunk.toString());
       codec_client_->sendData(encoder, chunk, false);
     }
-    Buffer::OwnedImpl empty_chunk;
-    codec_client_->sendData(encoder, empty_chunk, true);
+    if (codec_client_->streamOpen()) {
+      Buffer::OwnedImpl empty_chunk;
+      codec_client_->sendData(encoder, empty_chunk, true);
+    }
     return post_body;
   }
 
@@ -136,8 +142,10 @@ protected:
 };
 
 // Ensure that the test suite is run with all combinations the Envoy and Google gRPC clients.
-INSTANTIATE_TEST_SUITE_P(StreamingProtocols, StreamingIntegrationTest,
-                         GRPC_CLIENT_INTEGRATION_PARAMS);
+INSTANTIATE_TEST_SUITE_P(
+    StreamingProtocols, StreamingIntegrationTest,
+    GRPC_CLIENT_INTEGRATION_DEFERRED_PROCESSING_PARAMS,
+    Grpc::GrpcClientIntegrationParamTestWithDeferredProcessing::protocolTestParamsToString);
 
 // Send a body that's larger than the buffer limit, and have the processor return immediately
 // after the headers come in. Also check the metadata in this test.
@@ -663,11 +671,28 @@ TEST_P(StreamingIntegrationTest, PostAndProcessBufferedRequestBodyTooBig) {
         stream->Write(response);
 
         ProcessingRequest header_resp;
-        if (stream->Read(&header_resp)) {
-          ASSERT_TRUE(header_resp.has_response_headers());
+        bool seen_response_headers = false;
+
+        // Reading from the stream, we might receive the response headers
+        // later if we execute the local reply after the filter executes.
+        const int num_reads_for_response_headers =
+            Runtime::runtimeFeatureEnabled(
+                "envoy.reloadable_features.http_filter_avoid_reentrant_local_reply")
+                ? 2
+                : 1;
+        for (int i = 0; i < num_reads_for_response_headers; ++i) {
+          if (stream->Read(&header_resp) && header_resp.has_response_headers()) {
+            seen_response_headers = true;
+            break;
+          }
         }
+
+        ASSERT_TRUE(seen_response_headers);
       });
 
+  // Increase beyond the default to avoid timing out before getting the
+  // sidecar response.
+  proto_config_.mutable_message_timeout()->set_seconds(2);
   initializeConfig();
   HttpIntegrationTest::initialize();
   sendPostRequest(num_chunks, chunk_size, [total_size](Http::HeaderMap& headers) {

@@ -1,3 +1,4 @@
+#include <chrono>
 #include <memory>
 
 #include "envoy/config/core/v3/grpc_service.pb.h"
@@ -71,9 +72,12 @@ public:
         grpc_access_logger_impl_test_helper_(local_info_, async_client_) {
     EXPECT_CALL(*timer_, enableTimer(_, _));
     *config_.mutable_log_name() = "test_log_name";
-    logger_ = std::make_unique<GrpcAccessLoggerImpl>(Grpc::RawAsyncClientPtr{async_client_},
-                                                     config_, FlushInterval, BUFFER_SIZE_BYTES,
-                                                     dispatcher_, local_info_, stats_store_);
+    config_.mutable_buffer_size_bytes()->set_value(BUFFER_SIZE_BYTES);
+    config_.mutable_buffer_flush_interval()->set_nanos(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(FlushInterval).count());
+    logger_ =
+        std::make_unique<GrpcAccessLoggerImpl>(Grpc::RawAsyncClientPtr{async_client_}, config_,
+                                               dispatcher_, local_info_, *stats_store_.rootScope());
   }
 
   Grpc::MockAsyncClient* async_client_;
@@ -142,7 +146,8 @@ public:
   Grpc::MockAsyncClient* async_client_;
   Grpc::MockAsyncClientFactory* factory_;
   Grpc::MockAsyncClientManager async_client_manager_;
-  NiceMock<Stats::MockIsolatedStatsStore> scope_;
+  NiceMock<Stats::MockIsolatedStatsStore> store_;
+  Stats::Scope& scope_{*store_.rootScope()};
   NiceMock<ThreadLocal::MockInstance> tls_;
   LocalInfo::MockLocalInfo local_info_;
   GrpcAccessLoggerCacheImpl logger_cache_;

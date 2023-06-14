@@ -16,6 +16,100 @@ better performance than the linear list matching as seen in Envoy's HTTP routing
 use of extension points to make it easy to extend to different inputs based on protocol or
 environment data as well as custom sublinear matchers and direct matchers.
 
+Inputs and Matching Algorithms
+##############################
+
+Matching inputs define a way to extract the input value used for matching.
+The input functions are context-sensitive. For example, HTTP header inputs are
+applicable only in HTTP contexts, e.g. for matching HTTP requests.
+
+.. _extension_category_envoy.matching.http.input:
+
+HTTP Input Functions
+********************
+
+These input functions are available for matching HTTP requests:
+
+* :ref:`Request header value <extension_envoy.matching.inputs.request_headers>`.
+* :ref:`Request trailer value <extension_envoy.matching.inputs.request_trailers>`.
+* :ref:`Response header value <extension_envoy.matching.inputs.response_headers>`.
+* :ref:`Response trailer value <extension_envoy.matching.inputs.response_trailers>`.
+* :ref:`Query parameters value <extension_envoy.matching.inputs.query_params>`.
+
+.. _extension_category_envoy.matching.network.input:
+
+Network Input Functions
+***********************
+
+These input functions are available for matching TCP connections, UDP datagrams, and HTTP requests:
+
+* :ref:`Destination IP <extension_envoy.matching.inputs.destination_ip>`.
+* :ref:`Destination port <extension_envoy.matching.inputs.destination_port>`.
+* :ref:`Source IP <extension_envoy.matching.inputs.source_ip>`.
+* :ref:`Source port <extension_envoy.matching.inputs.source_port>`.
+
+These input functions are available for matching TCP connections and HTTP requests:
+
+* :ref:`Direct source IP <extension_envoy.matching.inputs.direct_source_ip>`.
+* :ref:`Source type <extension_envoy.matching.inputs.source_type>`.
+* :ref:`Server name <extension_envoy.matching.inputs.server_name>`.
+
+These input functions are available for matching TCP connections:
+
+* :ref:`Transport protocol <extension_envoy.matching.inputs.transport_protocol>`.
+* :ref:`Application protocol <extension_envoy.matching.inputs.application_protocol>`.
+* :ref:`Filter state <extension_envoy.matching.inputs.filter_state>`.
+
+.. _extension_category_envoy.matching.ssl.input:
+
+SSL Input Functions
+*******************
+
+These input functions are available for matching TCP connections and HTTP requests:
+
+* :ref:`URI SAN <extension_envoy.matching.inputs.uri_san>`.
+* :ref:`DNS SAN <extension_envoy.matching.inputs.dns_san>`.
+* :ref:`Subject <extension_envoy.matching.inputs.subject>`.
+
+Common Input Functions
+**********************
+
+These input functions are available in any context:
+
+* :ref:`Environment variable <extension_envoy.matching.common_inputs.environment_variable>`.
+
+Custom Matching Algorithms
+**************************
+
+In addition to the built-in exact and prefix matchers, these custom matchers
+are available in some contexts:
+
+.. _extension_envoy.matching.custom_matchers.trie_matcher:
+
+* :ref:`Trie-based IP matcher <envoy_v3_api_msg_.xds.type.matcher.v3.IPMatcher>` applies to network inputs.
+
+Matching actions
+################
+
+The action in the matcher framework typically refers to the selected resource by name.
+
+Network filter chain matching supports the following extensions:
+
+.. _extension_envoy.matching.actions.format_string:
+
+* :ref:`Format string action <envoy_v3_api_msg_config.core.v3.SubstitutionFormatString>` computes the filter chain name
+  from the connection dynamic metadata and its filter state. Example:
+
+.. validated-code-block:: yaml
+  :type-name: envoy.config.common.matcher.v3.Matcher.OnMatch
+
+  action:
+    name: foo
+    typed_config:
+      "@type": type.googleapis.com/envoy.config.core.v3.SubstitutionFormatString
+      text_format_source:
+        inline_string: "%DYNAMIC_METADATA(com.test_filter:test_key)%"
+
 Filter Integration
 ##################
 
@@ -87,8 +181,9 @@ HTTP Routing Integration
 ########################
 
 The matching API can be used with HTTP routing, by specifying a match tree as part of the virtual host
-and specifying a Route as the resulting action. See examples in the above sections for how the match
-tree can be configured.
+and specifying a :ref:`Route <envoy_v3_api_msg_config.route.v3.Route>` or :ref:`RouteList
+<envoy_v3_api_msg_config.route.v3.RouteList>` as the resulting action. See :ref:`the examples
+<arch_overview_http_routing_matcher>` for how the match tree can be configured.
 
 Match Tree Validation
 #####################

@@ -4,8 +4,8 @@
 OAuth2
 ======
 
+* This filter should be configured with the type URL ``type.googleapis.com/envoy.extensions.filters.http.oauth2.v3.OAuth2``.
 * :ref:`v3 API reference <envoy_v3_api_msg_extensions.filters.http.oauth2.v3.OAuth2>`
-* This filter should be configured with the name *envoy.filters.http.oauth2*.
 
 The OAuth filter's flow involves:
 
@@ -27,8 +27,9 @@ The OAuth filter's flow involves:
   flow. These cookies are calculated using the
   :ref:`hmac_secret <envoy_v3_api_field_extensions.filters.http.oauth2.v3.OAuth2Credentials.hmac_secret>`
   to assist in encoding.
-* The filter calls continueDecoding() to unblock the filter chain.
-* The filter sets `IdToken` and `RefreshToken` cookies if they are provided by Identity provider along with `AccessToken`.
+* The filter calls ``continueDecoding()`` to unblock the filter chain.
+* The filter sets ``IdToken`` and ``RefreshToken`` cookies if they are provided by Identity provider along with ``AccessToken``. These cookie names
+  can be customized by setting :ref:`cookie_names <envoy_v3_api_field_extensions.filters.http.oauth2.v3.OAuth2Credentials.cookie_names>`.
 
 When the authn server validates the client and returns an authorization token back to the OAuth filter,
 no matter what format that token is, if
@@ -36,6 +37,20 @@ no matter what format that token is, if
 is set to true the filter will send over a
 cookie named ``BearerToken`` to the upstream. Additionally, the ``Authorization`` header will be populated
 with the same value.
+
+The OAuth filer encodes URLs in query parameters using the
+`URL encoding algorithm. <https://www.w3.org/TR/html5/forms.html#application/x-www-form-urlencoded-encoding-algorithm>`_
+
+When receiving request redirected from the authorization service the Oauth filer decodes URLs from query parameters.
+However the encoded character sequences that represent ASCII control characters or extended ASCII codepoints are not
+decoded. The characters without defined meaning in URL according to `RFC 3986 <https://datatracker.ietf.org/doc/html/rfc3986>`_
+are also left undecoded. Specifically the following characters are left in the encoded form:
+
+* Control characters with values less than or equal 0x1F
+* Space (0x20)
+* DEL character (0x7F)
+* Extended ASCII characters with values grteater than or equal 0x80
+* Characters without defined meaning in URL: `"<>\^{}|`
 
 .. note::
   By default, OAuth2 filter sets some cookies with the following names:
@@ -61,7 +76,7 @@ The following is an example configuring the filter.
       uri: oauth.com/token
       timeout: 3s
     authorization_endpoint: https://oauth.com/oauth/authorize/
-    redirect_uri: "%REQ(:x-forwarded-proto)%://%REQ(:authority)%/callback"
+    redirect_uri: "%REQ(x-forwarded-proto)%://%REQ(:authority)%/callback"
     redirect_path_matcher:
       path:
         exact: /callback
@@ -92,97 +107,107 @@ Below is a complete code example of how we employ the filter as one of
 :ref:`HttpConnectionManager HTTP filters
 <envoy_v3_api_field_extensions.filters.network.http_connection_manager.v3.HttpConnectionManager.http_filters>`
 
-.. code-block:: yaml
+.. validated-code-block:: yaml
+  :type-name: envoy.config.bootstrap.v3.Bootstrap
 
   static_resources:
     listeners:
-    - name:
+    - name: listener_0
       address:
-    filter_chains:
-    - filters:
-      - name: envoy.filters.network.http_connection_manager
-        typed_config:
-          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
-          http_filters:
-          - name: envoy.filters.http.oauth2
-            typed_config:
-              "@type": type.googleapis.com/envoy.extensions.filters.http.oauth2.v3.OAuth2
-              config:
-                token_endpoint:
-                  cluster: oauth
-                  uri: oauth.com/token
-                  timeout: 3s
-                authorization_endpoint: https://oauth.com/oauth/authorize/
-                redirect_uri: "%REQ(:x-forwarded-proto)%://%REQ(:authority)%/callback"
-                redirect_path_matcher:
-                  path:
-                    exact: /callback
-                signout_path:
-                  path:
-                    exact: /signout
-                credentials:
-                  client_id: foo
-                  token_secret:
-                    name: token
-                    sds_config:
-                      path: "/etc/envoy/token-secret.yaml"
-                  hmac_secret:
-                    name: hmac
-                    sds_config:
-                      path: "/etc/envoy/hmac.yaml"
-                # (Optional): defaults to 'user' scope if not provided
-                auth_scopes:
-                - user
-                - openid
-                - email
-                # (Optional): set resource parameter for Authorization request
-                resources:
-                - oauth2-resource
-                - http://example.com
-          - name: envoy.router
-          tracing: {}
-          codec_type: "AUTO"
-          stat_prefix: ingress_http
-          route_config:
-            virtual_hosts:
-            - name: service
-              domains: ["*"]
-              routes:
-              - match:
-                  prefix: "/"
-                route:
-                  cluster: service
-                  timeout: 5s
+        socket_address:
+          protocol: TCP
+          address: 127.0.0.1
+          port_value: 10000
+      filter_chains:
+      - filters:
+        - name: envoy.filters.network.http_connection_manager
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+            http_filters:
+            - name: envoy.filters.http.oauth2
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.http.oauth2.v3.OAuth2
+                config:
+                  token_endpoint:
+                    cluster: oauth
+                    uri: oauth.com/token
+                    timeout: 3s
+                  authorization_endpoint: https://oauth.com/oauth/authorize/
+                  redirect_uri: "%REQ(x-forwarded-proto)%://%REQ(:authority)%/callback"
+                  redirect_path_matcher:
+                    path:
+                      exact: /callback
+                  signout_path:
+                    path:
+                      exact: /signout
+                  credentials:
+                    client_id: foo
+                    token_secret:
+                      name: token
+                      sds_config:
+                        path: "/etc/envoy/token-secret.yaml"
+                    hmac_secret:
+                      name: hmac
+                      sds_config:
+                        path: "/etc/envoy/hmac.yaml"
+                  # (Optional): defaults to 'user' scope if not provided
+                  auth_scopes:
+                  - user
+                  - openid
+                  - email
+                  # (Optional): set resource parameter for Authorization request
+                  resources:
+                  - oauth2-resource
+                  - http://example.com
+            - name: envoy.router
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+            tracing: {}
+            codec_type: "AUTO"
+            stat_prefix: ingress_http
+            route_config:
+              virtual_hosts:
+              - name: service
+                domains: ["*"]
+                routes:
+                - match:
+                    prefix: "/"
+                  route:
+                    cluster: service
+                    timeout: 5s
 
-  clusters:
-  - name: service
-    connect_timeout: 5s
-    type: STATIC
-    lb_policy: ROUND_ROBIN
-    load_assignment:
-      cluster_name: service
-      endpoints:
-      - lb_endpoints:
-        - endpoint:
-            address:
-              socket_address:
-                address: 127.0.0.1
-                port_value: 8080
-  - name: oauth
-    connect_timeout: 5s
-    type: LOGICAL_DNS
-    lb_policy: ROUND_ROBIN
-    load_assignment:
-      cluster_name: oauth
-      endpoints:
-      - lb_endpoints:
-        - endpoint:
-            address:
-              socket_address:
-                address: auth.example.com
-                port_value: 443
-    tls_context:
-      sni: auth.example.com
+    clusters:
+    - name: service
+      connect_timeout: 5s
+      type: STATIC
+      lb_policy: ROUND_ROBIN
+      load_assignment:
+        cluster_name: service
+        endpoints:
+        - lb_endpoints:
+          - endpoint:
+              address:
+                socket_address:
+                  address: 127.0.0.1
+                  port_value: 8080
+    - name: oauth
+      connect_timeout: 5s
+      type: LOGICAL_DNS
+      lb_policy: ROUND_ROBIN
+      load_assignment:
+        cluster_name: oauth
+        endpoints:
+        - lb_endpoints:
+          - endpoint:
+              address:
+                socket_address:
+                  address: auth.example.com
+                  port_value: 443
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: auth.example.com
 
 Finally, the following code block illustrates sample contents inside a yaml file containing both credential secrets.
 Both the :ref:`token_secret <envoy_v3_api_field_extensions.filters.http.oauth2.v3.OAuth2Credentials.token_secret>`
@@ -219,7 +244,7 @@ sending the user to the configured auth endpoint.
 
 :ref:`pass_through_matcher <envoy_v3_api_field_extensions.filters.http.oauth2.v3.OAuth2Config.pass_through_matcher>` provides
 an interface for users to provide specific header matching criteria such that, when applicable, the OAuth flow is entirely skipped.
-When this occurs, the ``oauth_success`` metric is still incremented.
+When this occurs, the ``oauth_passthrough`` metric is incremented but ``success`` is not.
 
 Generally, allowlisting is inadvisable from a security standpoint.
 
@@ -233,5 +258,6 @@ The OAuth2 filter outputs statistics in the *<stat_prefix>.* namespace.
   :widths: 1, 1, 2
 
   oauth_failure, Counter, Total requests that were denied.
+  oauth_passthrough, Counter, Total request that matched a passthrough header.
   oauth_success, Counter, Total requests that were allowed.
   oauth_unauthorization_rq, Counter, Total unauthorized requests.

@@ -1,5 +1,5 @@
 diff --git a/src/Makefile b/src/Makefile
-index e65b55e..f0a61dd 100644
+index 30d64be2..ae7ec875 100644
 --- a/src/Makefile
 +++ b/src/Makefile
 @@ -27,7 +27,7 @@ NODOTABIVER= 51
@@ -33,7 +33,16 @@ index e65b55e..f0a61dd 100644
  #
  # Disable the JIT compiler, i.e. turn LuaJIT into a pure interpreter.
  #XCFLAGS+= -DLUAJIT_DISABLE_JIT
-@@ -591,7 +591,7 @@ endif
+@@ -212,7 +212,7 @@ TARGET_STCC= $(STATIC_CC)
+ TARGET_DYNCC= $(DYNAMIC_CC)
+ TARGET_LD= $(CROSS)$(CC)
+ TARGET_AR= $(CROSS)ar rcus
+-TARGET_STRIP= $(CROSS)strip
++TARGET_STRIP?= $(CROSS)strip
+ 
+ TARGET_LIBPATH= $(or $(PREFIX),/usr/local)/$(or $(MULTILIB),lib)
+ TARGET_SONAME= libluajit-$(ABIVER).so.$(MAJVER)
+@@ -598,7 +598,7 @@ endif
  
  Q= @
  E= @echo
@@ -43,7 +52,7 @@ index e65b55e..f0a61dd 100644
  
  ##############################################################################
 diff --git a/src/msvcbuild.bat b/src/msvcbuild.bat
-index ae035dc..0e7eac9 100644
+index d323d8d4..2e08a3a1 100644
 --- a/src/msvcbuild.bat
 +++ b/src/msvcbuild.bat
 @@ -13,9 +13,7 @@
@@ -62,7 +71,7 @@ index ae035dc..0e7eac9 100644
  @set LJDLLNAME=lua51.dll
  @set LJLIBNAME=lua51.lib
 -@set BUILDTYPE=release
- @set ALL_LIB=lib_base.c lib_math.c lib_bit.c lib_string.c lib_table.c lib_io.c lib_os.c lib_package.c lib_debug.c lib_jit.c lib_ffi.c
+ @set ALL_LIB=lib_base.c lib_math.c lib_bit.c lib_string.c lib_table.c lib_io.c lib_os.c lib_package.c lib_debug.c lib_jit.c lib_ffi.c lib_buffer.c
  
 -%LJCOMPILE% host\minilua.c
 +%LJCOMPILE% /O2 host\minilua.c
@@ -122,10 +131,10 @@ index ae035dc..0e7eac9 100644
  @if errorlevel 1 goto :BAD
 diff --git a/build.py b/build.py
 new file mode 100755
-index 0000000..3eb74ff
+index 00000000..1201542c
 --- /dev/null
 +++ b/build.py
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,52 @@
 +#!/usr/bin/env python3
 +
 +import argparse
@@ -145,14 +154,10 @@ index 0000000..3eb74ff
 +    os.environ["TARGET_CFLAGS"] = os.environ.get("CFLAGS", "") + " -fno-function-sections -fno-data-sections"
 +    os.environ["TARGET_LDFLAGS"] = os.environ.get("CFLAGS", "") + " -fno-function-sections -fno-data-sections"
 +    os.environ["CFLAGS"] = ""
-+    # LuaJIT compile process build a tool `buildvm` and use it, building `buildvm` with ASAN
-+    # will cause LSAN detect its leak and fail the build, set exitcode to 0 to make LSAN doesn't
-+    # fail on it.
-+    os.environ["LSAN_OPTIONS"] = "exitcode=0"
++    os.environ["LDFLAGS"] = ""
 +
-+    if "ENVOY_MSAN" in os.environ:
-+      os.environ["HOST_CFLAGS"] = "-fno-sanitize=memory"
-+      os.environ["HOST_LDFLAGS"] = "-fno-sanitize=memory"
++    # Don't strip the binary - it doesn't work when cross-compiling, and we don't use it anyway.
++    os.environ["TARGET_STRIP"] = "@echo"
 +
 +    # Remove LuaJIT from ASAN for now.
 +    # TODO(htuch): Remove this when https://github.com/envoyproxy/envoy/issues/6084 is resolved.

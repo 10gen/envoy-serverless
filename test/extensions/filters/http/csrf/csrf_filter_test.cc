@@ -43,7 +43,7 @@ public:
     const auto& add_regex_origin = policy.mutable_additional_origins()->Add();
     add_regex_origin->MergeFrom(TestUtility::createRegexMatcher(R"(www\-[0-9]\.allow\.com)"));
 
-    return std::make_shared<CsrfFilterConfig>(policy, "test", stats_, runtime_);
+    return std::make_shared<CsrfFilterConfig>(policy, "test", *stats_.rootScope(), runtime_);
   }
 
   CsrfFilterTest() : config_(setupConfig()), filter_(config_) {}
@@ -448,17 +448,6 @@ TEST_F(CsrfFilterTest, RequestFromInvalidAdditionalRegexOrigin) {
   EXPECT_EQ(0U, config_->stats().missing_source_origin_.value());
   EXPECT_EQ(1U, config_->stats().request_invalid_.value());
   EXPECT_EQ(0U, config_->stats().request_valid_.value());
-}
-
-// Test that the deprecated extension name is disabled by default.
-// TODO(zuercher): remove when envoy.deprecated_features.allow_deprecated_extension_names is removed
-TEST(CsrfFilterConfigTest, DEPRECATED_FEATURE_TEST(DeprecatedExtensionFilterName)) {
-  const std::string deprecated_name = "envoy.csrf";
-
-  ASSERT_EQ(
-      nullptr,
-      Registry::FactoryRegistry<Server::Configuration::NamedHttpFilterConfigFactory>::getFactory(
-          deprecated_name));
 }
 
 } // namespace Csrf

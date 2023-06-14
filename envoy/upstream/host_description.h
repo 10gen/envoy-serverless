@@ -13,6 +13,7 @@
 #include "envoy/stats/stats_macros.h"
 #include "envoy/upstream/health_check_host_monitor.h"
 #include "envoy/upstream/outlier_detection.h"
+#include "envoy/upstream/resource_manager.h"
 
 #include "absl/strings/string_view.h"
 
@@ -55,6 +56,34 @@ struct HostStats {
   }
 };
 
+/**
+ * Weakly-named load metrics to be reported as EndpointLoadMetricStats. Individual stats are
+ * accumulated by calling add(), which combines stats with the same name. The aggregated stats are
+ * retrieved by calling latch(), which also clears the current load metrics.
+ */
+class LoadMetricStats {
+public:
+  virtual ~LoadMetricStats() = default;
+
+  struct Stat {
+    uint64_t num_requests_with_metric = 0;
+    double total_metric_value = 0.0;
+  };
+
+  using StatMap = absl::flat_hash_map<std::string, Stat>;
+  using StatMapPtr = std::unique_ptr<StatMap>;
+
+  // Adds the given stat to the map. If the stat already exists in the map, then the stat is
+  // combined with the existing map entry by incrementing num_requests_with_metric and summing the
+  // total_metric_value fields. Otherwise, the stat is added with the provided value to the map,
+  // which retains all entries until the next call to latch(). This allows metrics to be added
+  // whose keys may not necessarily be known at startup time.
+  virtual void add(const absl::string_view key, double value) PURE;
+
+  // Returns an owning pointer to the current load metrics and clears the map.
+  virtual StatMapPtr latch() PURE;
+};
+
 class ClusterInfo;
 
 /**
@@ -90,6 +119,12 @@ public:
   virtual const ClusterInfo& cluster() const PURE;
 
   /**
+   * @return true if the cluster can create a connection for this priority, false otherwise.
+   * @param priority the priority the connection would have.
+   */
+  virtual bool canCreateConnection(Upstream::ResourcePriority priority) const PURE;
+
+  /**
    * @return the host's outlier detection monitor.
    */
   virtual Outlier::DetectorHostMonitor& outlierDetector() const PURE;
@@ -113,7 +148,7 @@ public:
   /**
    * @return the transport socket factory responsible for this host.
    */
-  virtual Network::TransportSocketFactory& transportSocketFactory() const PURE;
+  virtual Network::UpstreamTransportSocketFactory& transportSocketFactory() const PURE;
 
   /**
    * @return the address used to connect to the host.
@@ -130,6 +165,11 @@ public:
    * @return host specific stats.
    */
   virtual HostStats& stats() const PURE;
+
+  /**
+   * @return custom stats for multi-dimensional load balancing.
+   */
+  virtual LoadMetricStats& loadMetricStats() const PURE;
 
   /**
    * @return the locality of the host (deployment specific). This will be the default instance if
@@ -158,9 +198,10 @@ public:
   virtual void priority(uint32_t) PURE;
 
   /**
-   * @return timestamp in milliseconds of when host was created.
+   * @return timestamp of when host has transitioned from unhealthy to
+   *         healthy state via an active healthchecking.
    */
-  virtual MonotonicTime creationTime() const PURE;
+  virtual absl::optional<MonotonicTime> lastHcPassTime() const PURE;
 };
 
 using HostDescriptionConstSharedPtr = std::shared_ptr<const HostDescription>;
@@ -180,10 +221,10 @@ struct TransportSocketMatchStats {
 class TransportSocketMatcher {
 public:
   struct MatchData {
-    MatchData(Network::TransportSocketFactory& factory, TransportSocketMatchStats& stats,
+    MatchData(Network::UpstreamTransportSocketFactory& factory, TransportSocketMatchStats& stats,
               std::string name)
         : factory_(factory), stats_(stats), name_(std::move(name)) {}
-    Network::TransportSocketFactory& factory_;
+    Network::UpstreamTransportSocketFactory& factory_;
     TransportSocketMatchStats& stats_;
     std::string name_;
   };

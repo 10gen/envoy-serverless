@@ -68,7 +68,7 @@ void Wasm::initializeLifecycle(Server::ServerLifecycleNotifier& lifecycle_notifi
                                       [this, weak](Event::PostCb post_cb) {
                                         auto lock = weak.lock();
                                         if (lock) { // See if we are still alive.
-                                          server_shutdown_post_cb_ = post_cb;
+                                          server_shutdown_post_cb_ = std::move(post_cb);
                                         }
                                       });
 }
@@ -93,7 +93,7 @@ Wasm::Wasm(WasmHandleSharedPtr base_wasm_handle, Event::Dispatcher& dispatcher)
                [&base_wasm_handle]() {
                  return createWasmVm(absl::StrCat(
                      "envoy.wasm.runtime.",
-                     toAbslStringView(base_wasm_handle->wasm()->wasm_vm()->runtime())));
+                     toAbslStringView(base_wasm_handle->wasm()->wasm_vm()->getEngineName())));
                }),
       scope_(getWasm(base_wasm_handle)->scope_), api_(getWasm(base_wasm_handle)->api_),
       stat_name_pool_(scope_->symbolTable()),
@@ -148,7 +148,7 @@ Wasm::~Wasm() {
   lifecycle_stats_handler_.onEvent(WasmEvent::VmShutDown);
   ENVOY_LOG(debug, "~Wasm {} remaining active", lifecycle_stats_handler_.getActiveVmCount());
   if (server_shutdown_post_cb_) {
-    dispatcher_.post(server_shutdown_post_cb_);
+    dispatcher_.post(std::move(server_shutdown_post_cb_));
   }
 }
 
@@ -323,6 +323,9 @@ bool createWasm(const PluginSharedPtr& plugin, const Stats::ScopeSharedPtr& scop
   auto vm_config = config.config().vm_config();
   bool fetch = false;
   if (vm_config.code().has_remote()) {
+    // TODO(https://github.com/envoyproxy/envoy/issues/25052) Stabilize this feature.
+    ENVOY_LOG_TO_LOGGER(Envoy::Logger::Registry::getLog(Envoy::Logger::Id::wasm), warn,
+                        "Wasm remote code fetch is unstable and may cause a crash");
     auto now = dispatcher.timeSource().monotonicTime() + cache_time_offset_for_testing;
     source = vm_config.code().remote().http_uri().uri();
     std::lock_guard<std::mutex> guard(code_cache_mutex);

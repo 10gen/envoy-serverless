@@ -223,9 +223,7 @@ static size_t curlCallback(char* ptr, size_t, size_t nmemb, void* data) {
   return nmemb;
 }
 
-absl::optional<std::string> Utility::metadataFetcher(const std::string& host,
-                                                     const std::string& path,
-                                                     const std::string& auth_token) {
+absl::optional<std::string> Utility::fetchMetadata(Http::RequestMessage& message) {
   static const size_t MAX_RETRIES = 4;
   static const std::chrono::milliseconds RETRY_DELAY{1000};
   static const std::chrono::seconds TIMEOUT{5};
@@ -235,7 +233,11 @@ absl::optional<std::string> Utility::metadataFetcher(const std::string& host,
     return absl::nullopt;
   };
 
-  const std::string url = fmt::format("http://{}/{}", host, path);
+  const auto host = message.headers().getHostValue();
+  const auto path = message.headers().getPathValue();
+  const auto method = message.headers().getMethodValue();
+
+  const std::string url = fmt::format("http://{}{}", host, path);
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, TIMEOUT.count());
   curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
@@ -246,9 +248,33 @@ absl::optional<std::string> Utility::metadataFetcher(const std::string& host,
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlCallback);
 
   struct curl_slist* headers = nullptr;
-  if (!auth_token.empty()) {
-    const std::string auth = fmt::format("Authorization: {}", auth_token);
-    headers = curl_slist_append(headers, auth.c_str());
+  message.headers().iterate([&headers](const Http::HeaderEntry& entry) -> Http::HeaderMap::Iterate {
+    // Skip pseudo-headers
+    if (!entry.key().getStringView().empty() && entry.key().getStringView()[0] == ':') {
+      return Http::HeaderMap::Iterate::Continue;
+    }
+    const std::string header =
+        fmt::format("{}: {}", entry.key().getStringView(), entry.value().getStringView());
+    headers = curl_slist_append(headers, header.c_str());
+    return Http::HeaderMap::Iterate::Continue;
+  });
+
+  // This function only support doing PUT(UPLOAD) other than GET(_default_) operation.
+  if (Http::Headers::get().MethodValues.Put == method) {
+    // https://curl.se/libcurl/c/CURLOPT_PUT.html is deprecated
+    // so using https://curl.se/libcurl/c/CURLOPT_UPLOAD.html.
+    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+    // To call PUT on HTTP 1.0 we must specify a value for the upload size
+    // since some old EC2's metadata service will be serving on HTTP 1.0.
+    // https://curl.se/libcurl/c/CURLOPT_INFILESIZE.html
+    curl_easy_setopt(curl, CURLOPT_INFILESIZE, 0);
+    // Disabling `Expect: 100-continue` header to get a response
+    // in the first attempt as the put size is zero.
+    // https://everything.curl.dev/http/post/expect100
+    headers = curl_slist_append(headers, "Expect:");
+  }
+
+  if (headers != nullptr) {
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
   }
 

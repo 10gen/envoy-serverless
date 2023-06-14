@@ -39,15 +39,18 @@ NewGrpcMuxImpl::NewGrpcMuxImpl(Grpc::RawAsyncClientPtr&& async_client,
                                const Protobuf::MethodDescriptor& service_method,
                                Random::RandomGenerator& random, Stats::Scope& scope,
                                const RateLimitSettings& rate_limit_settings,
-                               const LocalInfo::LocalInfo& local_info)
+                               const LocalInfo::LocalInfo& local_info,
+                               CustomConfigValidatorsPtr&& config_validators,
+                               JitteredExponentialBackOffStrategyPtr backoff_strategy,
+                               XdsConfigTrackerOptRef xds_config_tracker)
     : grpc_stream_(this, std::move(async_client), service_method, random, dispatcher, scope,
-                   rate_limit_settings),
-      local_info_(local_info),
+                   std::move(backoff_strategy), rate_limit_settings),
+      local_info_(local_info), config_validators_(std::move(config_validators)),
       dynamic_update_callback_handle_(local_info.contextProvider().addDynamicContextUpdateCallback(
           [this](absl::string_view resource_type_url) {
             onDynamicContextUpdate(resource_type_url);
           })),
-      dispatcher_(dispatcher) {
+      dispatcher_(dispatcher), xds_config_tracker_(xds_config_tracker) {
   AllMuxes::get().insert(this);
 }
 
@@ -88,6 +91,7 @@ void NewGrpcMuxImpl::onDiscoveryResponse(
     ControlPlaneStats& control_plane_stats) {
   ENVOY_LOG(debug, "Received DeltaDiscoveryResponse for {} at version {}", message->type_url(),
             message->system_version_info());
+
   auto sub = subscriptions_.find(message->type_url());
   if (sub == subscriptions_.end()) {
     ENVOY_LOG(warn,
@@ -99,15 +103,22 @@ void NewGrpcMuxImpl::onDiscoveryResponse(
 
   if (message->has_control_plane()) {
     control_plane_stats.identifier_.set(message->control_plane().identifier());
+
+    if (message->control_plane().identifier() != sub->second->control_plane_identifier_) {
+      sub->second->control_plane_identifier_ = message->control_plane().identifier();
+      ENVOY_LOG(debug, "Receiving gRPC updates for {} from {}", message->type_url(),
+                sub->second->control_plane_identifier_);
+    }
   }
 
-  if (message->control_plane().identifier() != sub->second->control_plane_identifier_) {
-    sub->second->control_plane_identifier_ = message->control_plane().identifier();
-    ENVOY_LOG(debug, "Receiving gRPC updates for {} from {}", message->type_url(),
-              sub->second->control_plane_identifier_);
-  }
+  auto ack = sub->second->sub_state_.handleResponse(*message);
 
-  kickOffAck(sub->second->sub_state_.handleResponse(*message));
+  // Processing point to record error if there is any failure after the response is processed.
+  if (xds_config_tracker_.has_value() &&
+      ack.error_detail_.code() != Grpc::Status::WellKnownGrpcStatus::Ok) {
+    xds_config_tracker_->onConfigRejected(*message, ack.error_detail_.message());
+  }
+  kickOffAck(ack);
   Memory::Utils::tryShrinkHeap();
 }
 
@@ -153,7 +164,7 @@ void NewGrpcMuxImpl::start() { grpc_stream_.establishNewStream(); }
 GrpcMuxWatchPtr NewGrpcMuxImpl::addWatch(const std::string& type_url,
                                          const absl::flat_hash_set<std::string>& resources,
                                          SubscriptionCallbacks& callbacks,
-                                         OpaqueResourceDecoder& resource_decoder,
+                                         OpaqueResourceDecoderSharedPtr resource_decoder,
                                          const SubscriptionOptions& options) {
   auto entry = subscriptions_.find(type_url);
   if (entry == subscriptions_.end()) {
@@ -162,7 +173,7 @@ GrpcMuxWatchPtr NewGrpcMuxImpl::addWatch(const std::string& type_url,
     return addWatch(type_url, resources, callbacks, resource_decoder, options);
   }
 
-  Watch* watch = entry->second->watch_map_.addWatch(callbacks, resource_decoder);
+  Watch* watch = entry->second->watch_map_.addWatch(callbacks, *resource_decoder);
   // updateWatch() queues a discovery request if any of 'resources' are not yet subscribed.
   updateWatch(type_url, watch, resources, options);
   return std::make_unique<WatchImpl>(type_url, watch, *this, options);
@@ -233,7 +244,8 @@ void NewGrpcMuxImpl::removeWatch(const std::string& type_url, Watch* watch) {
 void NewGrpcMuxImpl::addSubscription(const std::string& type_url,
                                      const bool use_namespace_matching) {
   subscriptions_.emplace(type_url, std::make_unique<SubscriptionStuff>(
-                                       type_url, local_info_, use_namespace_matching, dispatcher_));
+                                       type_url, local_info_, use_namespace_matching, dispatcher_,
+                                       *config_validators_.get(), xds_config_tracker_));
   subscription_ordering_.emplace_back(type_url);
 }
 

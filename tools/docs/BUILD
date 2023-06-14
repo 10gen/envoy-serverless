@@ -1,7 +1,7 @@
 load("@rules_python//python:defs.bzl", "py_binary")
-load("@base_pip3//:requirements.bzl", "entry_point", "requirement")
+load("@base_pip3//:requirements.bzl", "requirement")
+load("//tools/base:envoy_python.bzl", "envoy_entry_point")
 load("//bazel:envoy_build_system.bzl", "envoy_package")
-load("//tools/base:envoy_python.bzl", "envoy_py_binary")
 
 licenses(["notice"])  # Apache 2
 
@@ -22,7 +22,6 @@ py_binary(
     ],
     args = ["$(location //bazel:all_repository_locations)"],
     data = ["//bazel:all_repository_locations"],
-    deps = ["//tools/dependency:utils"],
 )
 
 py_binary(
@@ -40,16 +39,22 @@ py_binary(
 #
 #    https://github.com/envoyproxy/pytooling
 
-alias(
+envoy_entry_point(
     name = "sphinx_runner",
-    actual = entry_point(
-        pkg = "envoy.docs.sphinx_runner",
-        script = "envoy.docs.sphinx_runner",
-    ),
+    pkg = "envoy.docs.sphinx_runner",
 )
 
-envoy_py_binary(
-    name = "tools.docs.rst_check",
-    data = ["//docs:root/version_history/current.rst"],
-    deps = [requirement("envoy.base.checker")],
+py_binary(
+    name = "generate_version_histories",
+    srcs = [
+        "generate_version_histories.py",
+    ],
+    deps = [
+        requirement("aio.run.runner"),
+        requirement("envoy.base.utils"),
+        requirement("frozendict"),
+        requirement("jinja2"),
+        requirement("packaging"),
+        requirement("pyyaml"),
+    ],
 )

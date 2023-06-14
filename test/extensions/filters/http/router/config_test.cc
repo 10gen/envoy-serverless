@@ -43,8 +43,7 @@ TEST(RouterFilterConfigTest, BadRouterFilterConfig) {
   )EOF";
 
   envoy::extensions::filters::http::router::v3::Router proto_config;
-  EXPECT_THROW_WITH_REGEX(TestUtility::loadFromYaml(yaml_string, proto_config), EnvoyException,
-                          "route: Cannot find field");
+  EXPECT_THROW(TestUtility::loadFromYaml(yaml_string, proto_config), EnvoyException);
 }
 
 TEST(RouterFilterConfigTest, RouterFilterWithUnsupportedStrictHeaderCheck) {
@@ -84,17 +83,6 @@ TEST(RouterFilterConfigTest, RouterFilterWithEmptyProtoConfig) {
   Http::MockFilterChainFactoryCallbacks filter_callback;
   EXPECT_CALL(filter_callback, addStreamDecoderFilter(_));
   cb(filter_callback);
-}
-
-// Test that the deprecated extension name is disabled by default.
-// TODO(zuercher): remove when envoy.deprecated_features.allow_deprecated_extension_names is removed
-TEST(RouterFilterConfigTest, DEPRECATED_FEATURE_TEST(DeprecatedExtensionFilterName)) {
-  const std::string deprecated_name = "envoy.router";
-
-  ASSERT_EQ(
-      nullptr,
-      Registry::FactoryRegistry<Server::Configuration::NamedHttpFilterConfigFactory>::getFactory(
-          deprecated_name));
 }
 
 } // namespace

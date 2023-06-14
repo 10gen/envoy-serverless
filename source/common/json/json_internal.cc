@@ -364,8 +364,14 @@ void Field::buildJsonDocument(const Field& field, nlohmann::json& value) {
   case Type::Null: {
     break;
   }
-  default:
-    NOT_REACHED_GCOVR_EXCL_LINE;
+  case Type::Boolean:
+    FALLTHRU;
+  case Type::Double:
+    FALLTHRU;
+  case Type::Integer:
+    FALLTHRU;
+  case Type::String:
+    PANIC("not implemented");
   }
 }
 
@@ -458,7 +464,7 @@ std::vector<ObjectSharedPtr> Field::getObjectArray(const std::string& name,
   auto value_itr = value_.object_value_.find(name);
   if (value_itr == value_.object_value_.end() || !value_itr->second->isType(Type::Array)) {
     if (allow_empty && value_itr == value_.object_value_.end()) {
-      return std::vector<ObjectSharedPtr>();
+      return {};
     }
     throw Exception(fmt::format("key '{}' missing or not an array from lines {}-{}", name,
                                 line_number_start_, line_number_end_));
@@ -571,14 +577,16 @@ bool ObjectHandler::start_object(std::size_t) {
     stack_.push(object);
     state_ = State::ExpectKeyOrEndObject;
     return true;
-  default:
-    NOT_REACHED_GCOVR_EXCL_LINE;
+  case State::ExpectKeyOrEndObject:
+    FALLTHRU;
+  case State::ExpectFinished:
+    PANIC("not implemented");
   }
+  return false;
 }
 
 bool ObjectHandler::end_object() {
-  switch (state_) {
-  case State::ExpectKeyOrEndObject:
+  if (state_ == State::ExpectKeyOrEndObject) {
     stack_.top()->setLineNumberEnd(line_number_);
     stack_.pop();
 
@@ -590,20 +598,17 @@ bool ObjectHandler::end_object() {
       state_ = State::ExpectArrayValueOrEndArray;
     }
     return true;
-  default:
-    NOT_REACHED_GCOVR_EXCL_LINE;
   }
+  PANIC("parsing error not handled");
 }
 
 bool ObjectHandler::key(std::string& val) {
-  switch (state_) {
-  case State::ExpectKeyOrEndObject:
+  if (state_ == State::ExpectKeyOrEndObject) {
     key_ = val;
     state_ = State::ExpectValueOrStartObjectArray;
     return true;
-  default:
-    NOT_REACHED_GCOVR_EXCL_LINE;
   }
+  PANIC("parsing error not handled");
 }
 
 bool ObjectHandler::start_array(std::size_t) {
@@ -626,7 +631,7 @@ bool ObjectHandler::start_array(std::size_t) {
     state_ = State::ExpectArrayValueOrEndArray;
     return true;
   default:
-    NOT_REACHED_GCOVR_EXCL_LINE;
+    PANIC("parsing error not handled");
   }
 }
 
@@ -646,7 +651,7 @@ bool ObjectHandler::end_array() {
 
     return true;
   default:
-    NOT_REACHED_GCOVR_EXCL_LINE;
+    PANIC("parsing error not handled");
   }
 }
 
@@ -670,7 +675,7 @@ bool ObjectHandler::handleValueEvent(FieldSharedPtr ptr) {
 
 ObjectSharedPtr Factory::loadFromString(const std::string& json) {
   ObjectHandler handler;
-  auto json_container = JsonContainer(json.data(), &handler);
+  auto json_container = JsonContainer(json.c_str(), &handler);
 
   nlohmann::json::sax_parse(json_container, &handler);
 
@@ -679,6 +684,11 @@ ObjectSharedPtr Factory::loadFromString(const std::string& json) {
                                 handler.getErrorPosition(), handler.getParseError()));
   }
   return handler.getRoot();
+}
+
+std::string Factory::serialize(absl::string_view str) {
+  nlohmann::json j(str);
+  return j.dump();
 }
 
 } // namespace Nlohmann

@@ -28,12 +28,16 @@ public:
   const std::string Composite = "envoy.filters.http.composite";
   // CSRF filter
   const std::string Csrf = "envoy.filters.http.csrf";
+  // Custom Response filter
+  const std::string CustomResponse = "envoy.filters.http.custom_response";
   // Decompressor filter
   const std::string Decompressor = "envoy.filters.http.decompressor";
   // Dynamo filter
   const std::string Dynamo = "envoy.filters.http.dynamo";
   // Fault filter
   const std::string Fault = "envoy.filters.http.fault";
+  // GCP authentication filter
+  const std::string GcpAuthn = "envoy.filters.http.gcp_authn";
   // GRPC http1 bridge filter
   const std::string GrpcHttp1Bridge = "envoy.filters.http.grpc_http1_bridge";
   // GRPC json transcoder filter

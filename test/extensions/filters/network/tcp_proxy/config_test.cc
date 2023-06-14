@@ -60,7 +60,7 @@ TEST(ConfigTest, ConfigTest) {
   config.set_stat_prefix("prefix");
   config.set_cluster("cluster");
 
-  EXPECT_TRUE(factory.isTerminalFilterByProto(config, context));
+  EXPECT_TRUE(factory.isTerminalFilterByProto(config, context.getServerFactoryContext()));
 
   Network::FilterFactoryCb cb = factory.createFilterFactoryFromProto(config, context);
   Network::MockConnection connection;
@@ -70,17 +70,6 @@ TEST(ConfigTest, ConfigTest) {
         filter->initializeReadFilterCallbacks(readFilterCallback);
       }));
   cb(connection);
-}
-
-// Test that the deprecated extension name is disabled by default.
-// TODO(zuercher): remove when envoy.deprecated_features.allow_deprecated_extension_names is removed
-TEST(ConfigTest, DEPRECATED_FEATURE_TEST(DeprecatedExtensionFilterName)) {
-  const std::string deprecated_name = "envoy.tcp_proxy";
-
-  ASSERT_EQ(
-      nullptr,
-      Registry::FactoryRegistry<Server::Configuration::NamedNetworkFilterConfigFactory>::getFactory(
-          deprecated_name));
 }
 
 } // namespace TcpProxy

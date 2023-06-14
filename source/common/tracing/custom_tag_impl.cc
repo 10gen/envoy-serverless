@@ -6,6 +6,14 @@
 
 namespace Envoy {
 namespace Tracing {
+namespace {
+
+absl::optional<std::string> jsonOrNullopt(const Protobuf::Message& message) {
+  auto json_or_error = MessageUtil::getJsonStringFromMessage(message);
+  return json_or_error.ok() ? absl::optional<std::string>(json_or_error.value()) : absl::nullopt;
+}
+
+} // namespace
 
 void CustomTagBase::applySpan(Span& span, const CustomTagContext& ctx) const {
   absl::string_view tag_value = value(ctx);
@@ -94,9 +102,9 @@ MetadataCustomTag::metadataToString(const envoy::config::core::v3::Metadata* met
   case ProtobufWkt::Value::kStringValue:
     return value.string_value();
   case ProtobufWkt::Value::kListValue:
-    return MessageUtil::getJsonStringFromMessageOrDie(value.list_value());
+    return jsonOrNullopt(value.list_value());
   case ProtobufWkt::Value::kStructValue:
-    return MessageUtil::getJsonStringFromMessageOrDie(value.struct_value());
+    return jsonOrNullopt(value.struct_value());
   default:
     break;
   }
@@ -129,7 +137,8 @@ MetadataCustomTag::metadata(const CustomTagContext& ctx) const {
     return nullptr;
   }
   default:
-    NOT_REACHED_GCOVR_EXCL_LINE;
+    IS_ENVOY_BUG("Unknown config");
+    return nullptr;
   }
 }
 
@@ -144,9 +153,10 @@ CustomTagUtility::createCustomTag(const envoy::type::tracing::v3::CustomTag& tag
     return std::make_shared<const Tracing::RequestHeaderCustomTag>(tag.tag(), tag.request_header());
   case envoy::type::tracing::v3::CustomTag::TypeCase::kMetadata:
     return std::make_shared<const Tracing::MetadataCustomTag>(tag.tag(), tag.metadata());
-  default:
-    NOT_REACHED_GCOVR_EXCL_LINE;
+  case envoy::type::tracing::v3::CustomTag::TypeCase::TYPE_NOT_SET:
+    break; // Panic below.
   }
+  PANIC_DUE_TO_CORRUPT_ENUM;
 }
 
 } // namespace Tracing

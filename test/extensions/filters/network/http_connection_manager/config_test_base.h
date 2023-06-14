@@ -14,6 +14,7 @@
 #include "test/mocks/network/mocks.h"
 #include "test/mocks/server/factory_context.h"
 #include "test/test_common/registry.h"
+#include "test/test_common/test_runtime.h"
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -33,18 +34,23 @@ parseHttpConnectionManagerFromYaml(const std::string& yaml) {
 
 class HttpConnectionManagerConfigTest : public testing::Test {
 public:
+  HttpConnectionManagerConfigTest() {
+    scoped_runtime_.mergeValues(
+        {{"envoy.reloadable_features.no_extension_lookup_by_name", "false"}});
+  }
   NiceMock<Server::Configuration::MockFactoryContext> context_;
   Http::SlowDateProviderImpl date_provider_{context_.mainThreadDispatcher().timeSource()};
   NiceMock<Router::MockRouteConfigProviderManager> route_config_provider_manager_;
   NiceMock<Config::MockConfigProviderManager> scoped_routes_config_provider_manager_;
-  NiceMock<Tracing::MockHttpTracerManager> http_tracer_manager_;
+  NiceMock<Tracing::MockTracerManager> tracer_manager_;
   Filter::HttpFilterConfigProviderManagerImpl filter_config_provider_manager_;
-  std::shared_ptr<NiceMock<Tracing::MockHttpTracer>> http_tracer_{
-      std::make_shared<NiceMock<Tracing::MockHttpTracer>>()};
+  std::shared_ptr<NiceMock<Tracing::MockTracer>> http_tracer_{
+      std::make_shared<NiceMock<Tracing::MockTracer>>()};
+  TestScopedRuntime scoped_runtime_;
   void createHttpConnectionManagerConfig(const std::string& yaml) {
     HttpConnectionManagerConfig(parseHttpConnectionManagerFromYaml(yaml), context_, date_provider_,
                                 route_config_provider_manager_,
-                                scoped_routes_config_provider_manager_, http_tracer_manager_,
+                                scoped_routes_config_provider_manager_, tracer_manager_,
                                 filter_config_provider_manager_);
   }
 };

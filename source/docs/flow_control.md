@@ -101,6 +101,32 @@ upstream connections, the `readDisable(true)` calls are unwound in
 ClientConnectionImpl::onMessageComplete() to make sure that as connections are
 returned to the connection pool they are ready to read.
 
+#### HTTP2 defer processing backed up streams
+
+This section will be further integrated with the rest of the document when it is
+enabled by default (currently off by default). At a high level this change does
+the following:
+
+* If a HTTP/2 stream is read disabled anywhere we will begin buffering body and
+  trailers in the receiving side of the codec to minimize work done on the
+  stream when it's read disabled. There will be a callback scheduled to drain
+  these when the stream is read enabled, it can also be drained if the stream is
+  read enabled, and the stream is invoked with additional data.
+* The codec's receive buffer high watermark is still used in consideration for
+  granting peer stream additional window (preserving existing protocol flow
+  control). The codec's receive buffer high watermark was rarely used prior as we'd
+  eagerly dispatch data through the filter chain. An exceptions where it could be
+  triggered is if a filter in the filter chain either injects data triggering watermark.
+  The codec's receive buffer no longer read disables the stream, as we could be
+  read disabled elsewhere, buffer data in codec's receive buffer hitting high
+  watermark and never switch back to being read enabled.
+* One side effect of deferring stream processing is the need to defer processing
+  stream close. See ``deferred_stream_close`` in
+  :ref:`config_http_conn_man_stats_per_codec` for additional details.
+
+As of now we push all buffered data through the other end, but will implement
+chunking and fairness to avoid a stream starving the others.
+
 ## HTTP/2 codec recv buffer
 
 Given the HTTP/2 `Envoy::Http::Http2::ConnectionImpl::StreamImpl::pending_recv_data_` is processed immediately
@@ -127,6 +153,9 @@ an error response.
 Filters may override the default limit with calls to `setDecoderBufferLimit()`
 and `setEncoderBufferLimit()`. These limits are applied as filters are created
 so filters later in the chain can override the limits set by prior filters.
+It is recommended that filters calling these functions should generally only
+perform increases to the buffer limit, to avoid potentially conflicting with
+the buffer requirements of other filters in the chain.
 
 Most filters do not buffer internally, but instead push back on data by
 returning a FilterDataStatus on `encodeData()`/`decodeData()` calls.
@@ -305,7 +334,11 @@ watermark path is as follows:
     `DownstreamWatermarkCallbacks::onAboveWriteBufferHighWatermark()` for all
     filters which registered to receive watermark events
  * `Envoy::Router::Filter` receives `onAboveWriteBufferHighWatermark()` and calls
-   `readDisable(true)` on the upstream request.
+   `readDisable(true)` on the upstream request if response headers have arrived
+   already, otherwise defer the call till it arrives.
+ * Upon upstream `decode1xxHeaders()` or `decodeHeaders()`, if `readDisable(true)` has been
+   deferred and is still outstanding (which means no `onBelowWriteBufferLowWatermark()` has
+   been called on the filter), call `readDisable(true)` on the upstream stream.
 
 The low watermark path is as follows:
 
@@ -320,7 +353,9 @@ The low watermark path is as follows:
     `DownstreamWatermarkCallbacks::onBelowWriteBufferLowWatermark()` for all
     filters which registered to receive watermark events.
  * `Envoy::Router::Filter` receives `onBelowWriteBufferLowWatermark()` and calls
-   `readDisable(false)` on the upstream request.
+   `readDisable(false)` on the upstream request if response headers have arrived
+   already, otherwise cancel out a deferred `readDisable(true)` on the upstream
+   request.
 
 # HTTP/2 network downstream network buffer
 

@@ -8,6 +8,15 @@
 #include "source/common/api/os_sys_calls_impl.h"
 #include "source/common/network/address_impl.h"
 
+#if defined(__ANDROID_API__) && __ANDROID_API__ < 24
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wold-style-cast"
+namespace android {
+#include "third_party/android/ifaddrs-android.h"
+} // namespace android
+#pragma clang diagnostic pop
+#endif
+
 namespace Envoy {
 namespace Api {
 
@@ -39,6 +48,23 @@ SysCallSizeResult OsSysCallsImpl::writev(os_fd_t fd, const iovec* iov, int num_i
 
 SysCallSizeResult OsSysCallsImpl::readv(os_fd_t fd, const iovec* iov, int num_iov) {
   const ssize_t rc = ::readv(fd, iov, num_iov);
+  return {rc, rc != -1 ? 0 : errno};
+}
+
+SysCallSizeResult OsSysCallsImpl::pwrite(os_fd_t fd, const void* buffer, size_t length,
+                                         off_t offset) const {
+  const ssize_t rc = ::pwrite(fd, buffer, length, offset);
+  return {rc, rc != -1 ? 0 : errno};
+}
+
+SysCallSizeResult OsSysCallsImpl::pread(os_fd_t fd, void* buffer, size_t length,
+                                        off_t offset) const {
+  const ssize_t rc = ::pread(fd, buffer, length, offset);
+  return {rc, rc != -1 ? 0 : errno};
+}
+
+SysCallSizeResult OsSysCallsImpl::send(os_fd_t socket, void* buffer, size_t length, int flags) {
+  const ssize_t rc = ::send(socket, buffer, length, flags);
   return {rc, rc != -1 ? 0 : errno};
 }
 
@@ -182,6 +208,11 @@ SysCallIntResult OsSysCallsImpl::stat(const char* pathname, struct stat* buf) {
   return {rc, rc != -1 ? 0 : errno};
 }
 
+SysCallIntResult OsSysCallsImpl::fstat(os_fd_t fd, struct stat* buf) {
+  const int rc = ::fstat(fd, buf);
+  return {rc, rc != -1 ? 0 : errno};
+}
+
 SysCallIntResult OsSysCallsImpl::setsockopt(os_fd_t sockfd, int level, int optname,
                                             const void* optval, socklen_t optlen) {
   const int rc = ::setsockopt(sockfd, level, optname, optval, optlen);
@@ -238,6 +269,34 @@ SysCallIntResult OsSysCallsImpl::connect(os_fd_t sockfd, const sockaddr* addr, s
   return {rc, rc != -1 ? 0 : errno};
 }
 
+SysCallIntResult OsSysCallsImpl::open(const char* pathname, int flags) const {
+  const int rc = ::open(pathname, flags);
+  return {rc, rc != -1 ? 0 : errno};
+}
+
+SysCallIntResult OsSysCallsImpl::open(const char* pathname, int flags, mode_t mode) const {
+  const int rc = ::open(pathname, flags, mode);
+  return {rc, rc != -1 ? 0 : errno};
+}
+
+SysCallIntResult OsSysCallsImpl::unlink(const char* pathname) const {
+  const int rc = ::unlink(pathname);
+  return {rc, rc != -1 ? 0 : errno};
+}
+
+SysCallIntResult OsSysCallsImpl::linkat(os_fd_t olddirfd, const char* oldpath, os_fd_t newdirfd,
+                                        const char* newpath, int flags) const {
+  const int rc = ::linkat(olddirfd, oldpath, newdirfd, newpath, flags);
+  return {rc, rc != -1 ? 0 : errno};
+}
+
+SysCallIntResult OsSysCallsImpl::mkstemp(char* tmplate) const {
+  const int rc = ::mkstemp(tmplate);
+  return {rc, rc != -1 ? 0 : errno};
+}
+
+bool OsSysCallsImpl::supportsAllPosixFileOperations() const { return true; }
+
 SysCallIntResult OsSysCallsImpl::shutdown(os_fd_t sockfd, int how) {
   const int rc = ::shutdown(sockfd, how);
   return {rc, rc != -1 ? 0 : errno};
@@ -290,6 +349,10 @@ SysCallBoolResult OsSysCallsImpl::socketTcpInfo([[maybe_unused]] os_fd_t sockfd,
   auto result = ::getsockopt(sockfd, IPPROTO_TCP, TCP_INFO, &unix_tcp_info, &len);
   if (!SOCKET_FAILURE(result)) {
     tcp_info->tcpi_rtt = std::chrono::microseconds(unix_tcp_info.tcpi_rtt);
+
+    const uint64_t mss = (unix_tcp_info.tcpi_snd_mss > 0) ? unix_tcp_info.tcpi_snd_mss : 1460;
+    // Convert packets to bytes.
+    tcp_info->tcpi_snd_cwnd = unix_tcp_info.tcpi_snd_cwnd * mss;
   }
   return {!SOCKET_FAILURE(result), !SOCKET_FAILURE(result) ? 0 : errno};
 #endif
@@ -297,35 +360,39 @@ SysCallBoolResult OsSysCallsImpl::socketTcpInfo([[maybe_unused]] os_fd_t sockfd,
   return {false, EOPNOTSUPP};
 }
 
-bool OsSysCallsImpl::supportsGetifaddrs() const {
-// TODO: eliminate this branching by upstreaming an alternative Android implementation
-// e.g.: https://github.com/envoyproxy/envoy-mobile/blob/main/third_party/android/ifaddrs-android.h
-#if defined(__ANDROID_API__) && __ANDROID_API__ < 24
-  if (alternate_getifaddrs_.has_value()) {
-    return true;
-  }
-  return false;
-#else
-  // Note: posix defaults to true regardless of whether an alternate getifaddrs has been set or not.
-  // This is because as far as we are aware only Android<24 lacks an implementation and thus another
-  // posix based platform that lacks a native getifaddrs implementation should be a programming
-  // error.
-  //
-  // That being said, if an alternate getifaddrs impl is set, that will be used in calls to
-  // OsSysCallsImpl::getifaddrs as seen below.
-  return true;
-#endif
-}
+bool OsSysCallsImpl::supportsGetifaddrs() const { return true; }
 
 SysCallIntResult OsSysCallsImpl::getifaddrs([[maybe_unused]] InterfaceAddressVector& interfaces) {
-  if (alternate_getifaddrs_.has_value()) {
-    return alternate_getifaddrs_.value()(interfaces);
+#if defined(__ANDROID_API__) && __ANDROID_API__ < 24
+  struct android::ifaddrs* ifaddr;
+  struct android::ifaddrs* ifa;
+
+  const int rc = android::getifaddrs(&ifaddr);
+  if (rc == -1) {
+    return {rc, errno};
   }
 
-// TODO: eliminate this branching by upstreaming an alternative Android implementation
-// e.g.: https://github.com/envoyproxy/envoy-mobile/blob/main/third_party/android/ifaddrs-android.h
-#if defined(__ANDROID_API__) && __ANDROID_API__ < 24
-  PANIC("not implemented");
+  for (ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+    if (ifa->ifa_addr == nullptr) {
+      continue;
+    }
+
+    if (ifa->ifa_addr->sa_family == AF_INET || ifa->ifa_addr->sa_family == AF_INET6) {
+      const sockaddr_storage* ss = reinterpret_cast<sockaddr_storage*>(ifa->ifa_addr);
+      size_t ss_len =
+          ifa->ifa_addr->sa_family == AF_INET ? sizeof(sockaddr_in) : sizeof(sockaddr_in6);
+      StatusOr<Network::Address::InstanceConstSharedPtr> address =
+          Network::Address::addressFromSockAddr(*ss, ss_len, ifa->ifa_addr->sa_family == AF_INET6);
+      if (address.ok()) {
+        interfaces.emplace_back(ifa->ifa_name, ifa->ifa_flags, *address);
+      }
+    }
+  }
+
+  if (ifaddr) {
+    android::freeifaddrs(ifaddr);
+  }
+  return {rc, 0};
 #else
   struct ifaddrs* ifaddr;
   struct ifaddrs* ifa;
@@ -359,6 +426,14 @@ SysCallIntResult OsSysCallsImpl::getifaddrs([[maybe_unused]] InterfaceAddressVec
   return {rc, 0};
 #endif
 }
+
+SysCallIntResult OsSysCallsImpl::getaddrinfo(const char* node, const char* service,
+                                             const addrinfo* hints, addrinfo** res) {
+  const int rc = ::getaddrinfo(node, service, hints, res);
+  return {rc, errno};
+}
+
+void OsSysCallsImpl::freeaddrinfo(addrinfo* res) { ::freeaddrinfo(res); }
 
 } // namespace Api
 } // namespace Envoy

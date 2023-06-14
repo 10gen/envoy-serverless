@@ -54,6 +54,8 @@ void MockConnectionBase::runLowWatermarkCallbacks() {
 }
 
 template <class T> static void initializeMockConnection(T& connection) {
+  ON_CALL(connection, connectionInfoSetter())
+      .WillByDefault(ReturnRef(*connection.stream_info_.downstream_connection_info_provider_));
   ON_CALL(connection, connectionInfoProvider())
       .WillByDefault(ReturnPointee(connection.stream_info_.downstream_connection_info_provider_));
   ON_CALL(connection, connectionInfoProviderSharedPtr())
@@ -80,6 +82,11 @@ template <class T> static void initializeMockConnection(T& connection) {
   ON_CALL(connection, close(_)).WillByDefault(Invoke([&connection](ConnectionCloseType) -> void {
     connection.raiseEvent(Network::ConnectionEvent::LocalClose);
   }));
+  ON_CALL(connection, close(_, _))
+      .WillByDefault(Invoke([&connection](ConnectionCloseType, absl::string_view details) -> void {
+        connection.local_close_reason_ = std::string(details);
+        connection.raiseEvent(Network::ConnectionEvent::LocalClose);
+      }));
   ON_CALL(connection, id()).WillByDefault(Return(connection.next_id_));
   connection.stream_info_.downstream_connection_info_provider_->setConnectionID(connection.id_);
   ON_CALL(connection, state()).WillByDefault(ReturnPointee(&connection.state_));
@@ -89,8 +96,12 @@ template <class T> static void initializeMockConnection(T& connection) {
     buffer.drain(buffer.length());
   }));
 
+  connection.stream_info_.setUpstreamBytesMeter(std::make_shared<StreamInfo::BytesMeter>());
   ON_CALL(connection, streamInfo()).WillByDefault(ReturnRef(connection.stream_info_));
   ON_CALL(Const(connection), streamInfo()).WillByDefault(ReturnRef(connection.stream_info_));
+  ON_CALL(connection, localCloseReason()).WillByDefault(Invoke([&connection]() {
+    return absl::string_view(connection.local_close_reason_);
+  }));
 }
 
 MockConnection::MockConnection() {

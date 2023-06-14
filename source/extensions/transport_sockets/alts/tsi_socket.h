@@ -5,6 +5,7 @@
 #include "source/common/buffer/buffer_impl.h"
 #include "source/common/buffer/watermark_buffer.h"
 #include "source/common/network/raw_buffer_socket.h"
+#include "source/common/network/transport_socket_options_impl.h"
 #include "source/extensions/transport_sockets/alts/noop_transport_socket_callbacks.h"
 #include "source/extensions/transport_sockets/alts/tsi_frame_protector.h"
 #include "source/extensions/transport_sockets/alts/tsi_handshaker.h"
@@ -50,15 +51,17 @@ class TsiSocket : public Network::TransportSocket,
 public:
   // For Test
   TsiSocket(HandshakerFactory handshaker_factory, HandshakeValidator handshake_validator,
-            Network::TransportSocketPtr&& raw_socket_ptr);
+            Network::TransportSocketPtr&& raw_socket_ptr, bool downstream);
 
   /**
    * @param handshaker_factory a function to initiate a TsiHandshaker
    * @param handshake_validator a function to validate the peer. Called right
    * after the handshake completed with peer data to do the peer validation.
    * The connection will be closed immediately if it returns false.
+   * @param downstream is true for downstream transport socket.
    */
-  TsiSocket(HandshakerFactory handshaker_factory, HandshakeValidator handshake_validator);
+  TsiSocket(HandshakerFactory handshaker_factory, HandshakeValidator handshake_validator,
+            bool downstream);
   ~TsiSocket() override;
 
   // Network::TransportSocket
@@ -68,6 +71,7 @@ public:
   bool canFlushClose() override { return handshake_complete_; }
   Envoy::Ssl::ConnectionInfoConstSharedPtr ssl() const override { return nullptr; }
   bool startSecureTransport() override { return false; }
+  void configureInitialCongestionWindow(uint64_t, std::chrono::microseconds) override {}
   Network::IoResult doWrite(Buffer::Instance& buffer, bool end_stream) override;
   void closeSocket(Network::ConnectionEvent event) override;
   Network::IoResult doRead(Buffer::Instance& buffer) override;
@@ -116,6 +120,7 @@ private:
   Envoy::Network::TransportSocketCallbacks* callbacks_{};
   std::unique_ptr<TsiTransportSocketCallbacks> tsi_callbacks_;
   Network::TransportSocketPtr raw_buffer_socket_;
+  const bool downstream_;
 
   Buffer::WatermarkBuffer raw_read_buffer_{[]() {}, []() {}, []() {}};
   Envoy::Buffer::OwnedImpl raw_write_buffer_;
@@ -126,16 +131,21 @@ private:
 };
 
 /**
- * An implementation of Network::TransportSocketFactory for TsiSocket
+ * An implementation of Network::UpstreamTransportSocketFactory for TsiSocket
  */
-class TsiSocketFactory : public Network::TransportSocketFactory {
+class TsiSocketFactory : public Network::DownstreamTransportSocketFactory,
+                         public Network::CommonUpstreamTransportSocketFactory {
 public:
   TsiSocketFactory(HandshakerFactory handshaker_factory, HandshakeValidator handshake_validator);
 
   bool implementsSecureTransport() const override;
-  bool usesProxyProtocolOptions() const override { return false; }
+  absl::string_view defaultServerNameIndication() const override { return ""; }
+
   Network::TransportSocketPtr
-  createTransportSocket(Network::TransportSocketOptionsConstSharedPtr options) const override;
+  createTransportSocket(Network::TransportSocketOptionsConstSharedPtr options,
+                        Upstream::HostDescriptionConstSharedPtr) const override;
+
+  Network::TransportSocketPtr createDownstreamTransportSocket() const override;
 
 private:
   HandshakerFactory handshaker_factory_;

@@ -13,6 +13,7 @@
 #include "source/common/common/thread.h"
 #include "source/common/common/utility.h"
 #include "source/common/network/socket_interface.h"
+#include "source/common/runtime/runtime_features.h"
 
 namespace Envoy {
 namespace Network {
@@ -46,9 +47,32 @@ InstanceConstSharedPtr throwOnError(StatusOr<InstanceConstSharedPtr> address) {
 
 } // namespace
 
+bool forceV6() {
+#if defined(__APPLE__) || defined(__ANDROID_API__)
+  return Runtime::runtimeFeatureEnabled("envoy.reloadable_features.always_use_v6");
+#else
+  return false;
+#endif
+}
+
+void ipv6ToIpv4CompatibleAddress(const struct sockaddr_in6* sin6, struct sockaddr_in* sin) {
+#if defined(__APPLE__)
+  *sin = {{}, AF_INET, sin6->sin6_port, {sin6->sin6_addr.__u6_addr.__u6_addr32[3]}, {}};
+#elif defined(WIN32)
+  struct in_addr in_v4 = {};
+  in_v4.S_un.S_addr = reinterpret_cast<const uint32_t*>(sin6->sin6_addr.u.Byte)[3];
+  *sin = {AF_INET, sin6->sin6_port, in_v4, {}};
+#else
+  *sin = {AF_INET, sin6->sin6_port, {sin6->sin6_addr.s6_addr32[3]}, {}};
+#endif
+}
+
 StatusOr<Address::InstanceConstSharedPtr> addressFromSockAddr(const sockaddr_storage& ss,
                                                               socklen_t ss_len, bool v6only) {
   RELEASE_ASSERT(ss_len == 0 || static_cast<unsigned int>(ss_len) >= sizeof(sa_family_t), "");
+  if (forceV6()) {
+    v6only = false;
+  }
   switch (ss.ss_family) {
   case AF_INET: {
     RELEASE_ASSERT(ss_len == 0 || static_cast<unsigned int>(ss_len) == sizeof(sockaddr_in), "");
@@ -61,16 +85,8 @@ StatusOr<Address::InstanceConstSharedPtr> addressFromSockAddr(const sockaddr_sto
     const struct sockaddr_in6* sin6 = reinterpret_cast<const struct sockaddr_in6*>(&ss);
     ASSERT(AF_INET6 == sin6->sin6_family);
     if (!v6only && IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr)) {
-#if defined(__APPLE__)
-      struct sockaddr_in sin = {
-          {}, AF_INET, sin6->sin6_port, {sin6->sin6_addr.__u6_addr.__u6_addr32[3]}, {}};
-#elif defined(WIN32)
-      struct in_addr in_v4 = {};
-      in_v4.S_un.S_addr = reinterpret_cast<const uint32_t*>(sin6->sin6_addr.u.Byte)[3];
-      struct sockaddr_in sin = {AF_INET, sin6->sin6_port, in_v4, {}};
-#else
-      struct sockaddr_in sin = {AF_INET, sin6->sin6_port, {sin6->sin6_addr.s6_addr32[3]}, {}};
-#endif
+      struct sockaddr_in sin;
+      ipv6ToIpv4CompatibleAddress(sin6, &sin);
       return Address::InstanceFactory::createInstancePtr<Address::Ipv4Instance>(&sin);
     } else {
       return Address::InstanceFactory::createInstancePtr<Address::Ipv6Instance>(*sin6, v6only);
@@ -218,10 +234,12 @@ void Ipv4Instance::initHelper(const sockaddr_in* address) {
 
 absl::uint128 Ipv6Instance::Ipv6Helper::address() const {
   absl::uint128 result{0};
-  static_assert(sizeof(absl::uint128) == 16, "The size of asbl::uint128 is not 16.");
+  static_assert(sizeof(absl::uint128) == 16, "The size of absl::uint128 is not 16.");
   safeMemcpyUnsafeSrc(&result, &address_.sin6_addr.s6_addr[0]);
   return result;
 }
+
+uint32_t Ipv6Instance::Ipv6Helper::scopeId() const { return address_.sin6_scope_id; }
 
 uint32_t Ipv6Instance::Ipv6Helper::port() const { return ntohs(address_.sin6_port); }
 
@@ -231,7 +249,30 @@ std::string Ipv6Instance::Ipv6Helper::makeFriendlyAddress() const {
   char str[INET6_ADDRSTRLEN];
   const char* ptr = inet_ntop(AF_INET6, &address_.sin6_addr, str, INET6_ADDRSTRLEN);
   ASSERT(str == ptr);
+  if (address_.sin6_scope_id != 0) {
+    // Note that here we don't use the `if_indextoname` that will give a more user friendly
+    // output just because in the past created a performance bottleneck if the machine had a
+    // lot of IPv6 Link local addresses.
+    return absl::StrCat(ptr, "%", scopeId());
+  }
   return ptr;
+}
+
+InstanceConstSharedPtr Ipv6Instance::Ipv6Helper::v4CompatibleAddress() const {
+  if (!v6only_ && IN6_IS_ADDR_V4MAPPED(&address_.sin6_addr)) {
+    struct sockaddr_in sin;
+    ipv6ToIpv4CompatibleAddress(&address_, &sin);
+    auto addr = Address::InstanceFactory::createInstancePtr<Address::Ipv4Instance>(&sin);
+    return addr.ok() ? addr.value() : nullptr;
+  }
+  return nullptr;
+}
+
+InstanceConstSharedPtr Ipv6Instance::Ipv6Helper::addressWithoutScopeId() const {
+  struct sockaddr_in6 ret_addr = address_;
+  ret_addr.sin6_scope_id = 0;
+  auto addr = Address::InstanceFactory::createInstancePtr<Address::Ipv6Instance>(ret_addr, v6only_);
+  return addr.ok() ? addr.value() : nullptr;
 }
 
 Ipv6Instance::Ipv6Instance(const sockaddr_in6& address, bool v6only,
@@ -245,21 +286,21 @@ Ipv6Instance::Ipv6Instance(const std::string& address, const SocketInterface* so
     : Ipv6Instance(address, 0, sockInterfaceOrDefault(sock_interface)) {}
 
 Ipv6Instance::Ipv6Instance(const std::string& address, uint32_t port,
-                           const SocketInterface* sock_interface)
+                           const SocketInterface* sock_interface, bool v6only)
     : InstanceBase(Type::Ip, sockInterfaceOrDefault(sock_interface)) {
   throwOnError(validateProtocolSupported());
-  ip_.ipv6_.address_.sin6_family = AF_INET6;
-  ip_.ipv6_.address_.sin6_port = htons(port);
+  sockaddr_in6 addr_in;
+  memset(&addr_in, 0, sizeof(addr_in));
+  addr_in.sin6_family = AF_INET6;
+  addr_in.sin6_port = htons(port);
   if (!address.empty()) {
-    if (1 != inet_pton(AF_INET6, address.c_str(), &ip_.ipv6_.address_.sin6_addr)) {
+    if (1 != inet_pton(AF_INET6, address.c_str(), &addr_in.sin6_addr)) {
       throw EnvoyException(fmt::format("invalid ipv6 address '{}'", address));
     }
   } else {
-    ip_.ipv6_.address_.sin6_addr = in6addr_any;
+    addr_in.sin6_addr = in6addr_any;
   }
-  // Just in case address is in a non-canonical format, format from network address.
-  ip_.friendly_address_ = ip_.ipv6_.makeFriendlyAddress();
-  friendly_name_ = fmt::format("[{}]:{}", ip_.friendly_address_, ip_.port());
+  initHelper(addr_in, v6only);
 }
 
 Ipv6Instance::Ipv6Instance(uint32_t port, const SocketInterface* sock_interface)
@@ -268,7 +309,8 @@ Ipv6Instance::Ipv6Instance(uint32_t port, const SocketInterface* sock_interface)
 bool Ipv6Instance::operator==(const Instance& rhs) const {
   const auto* rhs_casted = dynamic_cast<const Ipv6Instance*>(&rhs);
   return (rhs_casted && (ip_.ipv6_.address() == rhs_casted->ip_.ipv6_.address()) &&
-          (ip_.port() == rhs_casted->ip_.port()));
+          (ip_.port() == rhs_casted->ip_.port()) &&
+          (ip_.ipv6_.scopeId() == rhs_casted->ip_.ipv6_.scopeId()));
 }
 
 Ipv6Instance::Ipv6Instance(absl::Status& status, const sockaddr_in6& address, bool v6only,
@@ -390,10 +432,11 @@ absl::Status PipeInstance::initHelper(const sockaddr_un* address, mode_t mode) {
 }
 
 EnvoyInternalInstance::EnvoyInternalInstance(const std::string& address_id,
+                                             const std::string& endpoint_id,
                                              const SocketInterface* sock_interface)
     : InstanceBase(Type::EnvoyInternal, sockInterfaceOrDefault(sock_interface)),
-      internal_address_(address_id) {
-  friendly_name_ = absl::StrCat("envoy://", address_id);
+      internal_address_(address_id, endpoint_id) {
+  friendly_name_ = absl::StrCat("envoy://", address_id, "/", endpoint_id);
 }
 
 bool EnvoyInternalInstance::operator==(const Instance& rhs) const {

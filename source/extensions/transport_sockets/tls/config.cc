@@ -12,7 +12,7 @@ namespace Extensions {
 namespace TransportSockets {
 namespace Tls {
 
-Network::TransportSocketFactoryPtr UpstreamSslSocketFactory::createTransportSocketFactory(
+Network::UpstreamTransportSocketFactoryPtr UpstreamSslSocketFactory::createTransportSocketFactory(
     const Protobuf::Message& message,
     Server::Configuration::TransportSocketFactoryContext& context) {
   auto client_config = std::make_unique<ClientContextConfigImpl>(
@@ -28,10 +28,11 @@ ProtobufTypes::MessagePtr UpstreamSslSocketFactory::createEmptyConfigProto() {
   return std::make_unique<envoy::extensions::transport_sockets::tls::v3::UpstreamTlsContext>();
 }
 
-REGISTER_FACTORY(UpstreamSslSocketFactory,
-                 Server::Configuration::UpstreamTransportSocketConfigFactory){"tls"};
+LEGACY_REGISTER_FACTORY(UpstreamSslSocketFactory,
+                        Server::Configuration::UpstreamTransportSocketConfigFactory, "tls");
 
-Network::TransportSocketFactoryPtr DownstreamSslSocketFactory::createTransportSocketFactory(
+Network::DownstreamTransportSocketFactoryPtr
+DownstreamSslSocketFactory::createTransportSocketFactory(
     const Protobuf::Message& message, Server::Configuration::TransportSocketFactoryContext& context,
     const std::vector<std::string>& server_names) {
   auto server_config = std::make_unique<ServerContextConfigImpl>(
@@ -47,8 +48,8 @@ ProtobufTypes::MessagePtr DownstreamSslSocketFactory::createEmptyConfigProto() {
   return std::make_unique<envoy::extensions::transport_sockets::tls::v3::DownstreamTlsContext>();
 }
 
-REGISTER_FACTORY(DownstreamSslSocketFactory,
-                 Server::Configuration::DownstreamTransportSocketConfigFactory){"tls"};
+LEGACY_REGISTER_FACTORY(DownstreamSslSocketFactory,
+                        Server::Configuration::DownstreamTransportSocketConfigFactory, "tls");
 
 Ssl::ContextManagerPtr SslContextManagerFactory::createContextManager(TimeSource& time_source) {
   return std::make_unique<ContextManagerImpl>(time_source);

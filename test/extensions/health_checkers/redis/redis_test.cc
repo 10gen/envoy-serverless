@@ -131,7 +131,7 @@ public:
     interval: 1s
     no_traffic_interval: 5s
     interval_jitter: 1s
-    unhealthy_threshold: 1
+    unhealthy_threshold: 2
     healthy_threshold: 1
     custom_health_check:
       name: redis
@@ -214,7 +214,7 @@ public:
   create(Upstream::HostConstSharedPtr, Event::Dispatcher&,
          const Extensions::NetworkFilters::Common::Redis::Client::Config&,
          const Extensions::NetworkFilters::Common::Redis::RedisCommandStatsSharedPtr&,
-         Stats::Scope&, const std::string& username, const std::string& password) override {
+         Stats::Scope&, const std::string& username, const std::string& password, bool) override {
     EXPECT_EQ(auth_username_, username);
     EXPECT_EQ(auth_password_, password);
     return Extensions::NetworkFilters::Common::Redis::Client::ClientPtr{create_()};
@@ -602,6 +602,8 @@ TEST_F(RedisHealthCheckerTest, Exists) {
   EXPECT_EQ(3UL, cluster_->info_->stats_store_.counter("health_check.attempt").value());
   EXPECT_EQ(1UL, cluster_->info_->stats_store_.counter("health_check.success").value());
   EXPECT_EQ(2UL, cluster_->info_->stats_store_.counter("health_check.failure").value());
+  EXPECT_EQ(2UL,
+            cluster_->info_->stats_store_.counter("health_check.redis.exists_failure").value());
 }
 
 TEST_F(RedisHealthCheckerTest, ExistsRedirected) {

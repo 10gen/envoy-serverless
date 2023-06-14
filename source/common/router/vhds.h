@@ -41,8 +41,8 @@ class VhdsSubscription : Envoy::Config::SubscriptionBase<envoy::config::route::v
 public:
   VhdsSubscription(RouteConfigUpdatePtr& config_update_info,
                    Server::Configuration::ServerFactoryContext& factory_context,
-                   const std::string& stat_prefix,
-                   absl::optional<RouteConfigProvider*>& route_config_providers);
+                   const std::string& stat_prefix, Rds::RouteConfigProvider* route_config_provider);
+
   ~VhdsSubscription() override { init_target_.ready(); }
 
   void registerInitTargetWithInitManager(Init::Manager& m) { m.add(init_target_); }
@@ -66,11 +66,11 @@ private:
                             const EnvoyException* e) override;
 
   RouteConfigUpdatePtr& config_update_info_;
-  Stats::ScopePtr scope_;
+  Stats::ScopeSharedPtr scope_;
   VhdsStats stats_;
   Envoy::Config::SubscriptionPtr subscription_;
   Init::TargetImpl init_target_;
-  absl::optional<RouteConfigProvider*>& route_config_provider_opt_;
+  Rds::RouteConfigProvider* route_config_provider_;
 };
 
 using VhdsSubscriptionPtr = std::unique_ptr<VhdsSubscription>;

@@ -24,12 +24,10 @@
 #include "source/common/runtime/runtime_impl.h"
 #include "source/common/secret/secret_manager_impl.h"
 #include "source/common/thread_local/thread_local_impl.h"
-#include "source/server/admin/admin.h"
 #include "source/server/config_validation/admin.h"
 #include "source/server/config_validation/api.h"
 #include "source/server/config_validation/cluster_manager.h"
 #include "source/server/config_validation/dns.h"
-#include "source/server/listener_manager_impl.h"
 #include "source/server/server.h"
 
 #include "absl/types/optional.h"
@@ -60,7 +58,6 @@ bool validateConfig(const Options& options,
  */
 class ValidationInstance final : Logger::Loggable<Logger::Id::main>,
                                  public Instance,
-                                 public ListenerComponentFactory,
                                  public ServerLifecycleNotifier,
                                  public WorkerFactory {
 public:
@@ -71,9 +68,14 @@ public:
                      Filesystem::Instance& file_system);
 
   // Server::Instance
-  Admin& admin() override { return *admin_; }
+  OptRef<Admin> admin() override {
+    return makeOptRefFromPtr(static_cast<Envoy::Server::Admin*>(admin_.get()));
+  }
   Api::Api& api() override { return *api_; }
   Upstream::ClusterManager& clusterManager() override { return *config_.clusterManager(); }
+  const Upstream::ClusterManager& clusterManager() const override {
+    return *config_.clusterManager();
+  }
   Ssl::ContextManager& sslContextManager() override { return *ssl_context_manager_; }
   Event::Dispatcher& dispatcher() override { return *dispatcher_; }
   Network::DnsResolverSharedPtr dnsResolver() override {
@@ -91,7 +93,12 @@ public:
   ServerLifecycleNotifier& lifecycleNotifier() override { return *this; }
   ListenerManager& listenerManager() override { return *listener_manager_; }
   Secret::SecretManager& secretManager() override { return *secret_manager_; }
-  Runtime::Loader& runtime() override { return Runtime::LoaderSingleton::get(); }
+  Runtime::Loader& runtime() override {
+    if (runtime_singleton_) {
+      return runtime_singleton_->instance();
+    }
+    return *runtime_;
+  }
   void shutdown() override;
   bool isShutdown() override { return false; }
   void shutdownAdmin() override {}
@@ -126,44 +133,6 @@ public:
     http_context_.setDefaultTracingConfig(tracing_config);
   }
   void setSinkPredicates(std::unique_ptr<Stats::SinkPredicates>&&) override {}
-
-  // Server::ListenerComponentFactory
-  LdsApiPtr createLdsApi(const envoy::config::core::v3::ConfigSource& lds_config,
-                         const xds::core::v3::ResourceLocator* lds_resources_locator) override {
-    return std::make_unique<LdsApiImpl>(lds_config, lds_resources_locator, clusterManager(),
-                                        initManager(), stats(), listenerManager(),
-                                        messageValidationContext().dynamicValidationVisitor());
-  }
-  std::vector<Network::FilterFactoryCb> createNetworkFilterFactoryList(
-      const Protobuf::RepeatedPtrField<envoy::config::listener::v3::Filter>& filters,
-      Server::Configuration::FilterChainFactoryContext& filter_chain_factory_context) override {
-    return ProdListenerComponentFactory::createNetworkFilterFactoryList_(
-        filters, filter_chain_factory_context);
-  }
-  std::vector<Network::ListenerFilterFactoryCb> createListenerFilterFactoryList(
-      const Protobuf::RepeatedPtrField<envoy::config::listener::v3::ListenerFilter>& filters,
-      Configuration::ListenerFactoryContext& context) override {
-    return ProdListenerComponentFactory::createListenerFilterFactoryList_(filters, context);
-  }
-  std::vector<Network::UdpListenerFilterFactoryCb> createUdpListenerFilterFactoryList(
-      const Protobuf::RepeatedPtrField<envoy::config::listener::v3::ListenerFilter>& filters,
-      Configuration::ListenerFactoryContext& context) override {
-    return ProdListenerComponentFactory::createUdpListenerFilterFactoryList_(filters, context);
-  }
-  Network::SocketSharedPtr
-  createListenSocket(Network::Address::InstanceConstSharedPtr, Network::Socket::Type,
-                     const Network::Socket::OptionsSharedPtr&, ListenerComponentFactory::BindType,
-                     const Network::SocketCreationOptions&, uint32_t) override {
-    // Returned sockets are not currently used so we can return nothing here safely vs. a
-    // validation mock.
-    // TODO(mattklein123): The fact that this returns nullptr makes the production code more
-    // convoluted than it needs to be. Fix this to return a mock in a follow up.
-    return nullptr;
-  }
-  DrainManagerPtr createDrainManager(envoy::config::listener::v3::Listener::DrainType) override {
-    return nullptr;
-  }
-  uint64_t nextListenerTag() override { return 0; }
 
   // Server::WorkerFactory
   WorkerPtr createWorker(uint32_t, OverloadManager&, const std::string&) override {
@@ -206,13 +175,14 @@ private:
   std::unique_ptr<Server::ValidationAdmin> admin_;
   Singleton::ManagerPtr singleton_manager_;
   std::unique_ptr<Runtime::ScopedLoaderSingleton> runtime_singleton_;
+  std::unique_ptr<Runtime::Loader> runtime_;
   Random::RandomGeneratorImpl random_generator_;
   std::unique_ptr<Ssl::ContextManager> ssl_context_manager_;
   Configuration::MainImpl config_;
   LocalInfo::LocalInfoPtr local_info_;
   AccessLog::AccessLogManagerImpl access_log_manager_;
   std::unique_ptr<Upstream::ValidationClusterManagerFactory> cluster_manager_factory_;
-  std::unique_ptr<ListenerManagerImpl> listener_manager_;
+  std::unique_ptr<ListenerManager> listener_manager_;
   std::unique_ptr<OverloadManager> overload_manager_;
   MutexTracer* mutex_tracer_;
   Grpc::ContextImpl grpc_context_;
@@ -221,6 +191,7 @@ private:
   Event::TimeSystem& time_system_;
   ServerFactoryContextImpl server_contexts_;
   Quic::QuicStatNames quic_stat_names_;
+  Filter::TcpListenerFilterConfigProviderManagerImpl tcp_listener_config_provider_manager_;
 };
 
 } // namespace Server

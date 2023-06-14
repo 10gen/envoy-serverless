@@ -1,11 +1,16 @@
 #pragma once
 
+#include "source/common/singleton/const_singleton.h"
+
+#include "absl/container/flat_hash_map.h"
+#include "absl/strings/string_view.h"
+
 namespace Envoy {
 namespace Extensions {
 namespace NetworkFilters {
 namespace SipProxy {
 
-enum class HeaderType {
+enum HeaderType {
   TopLine,
   CallId,
   Via,
@@ -20,13 +25,15 @@ enum class HeaderType {
   SRoute,
   WAuth,
   Auth,
+  PCookieIPMap,
   Other,
-  InvalidFormat
+  InvalidFormat,
+  HeaderMaxNum
 };
 
 enum class MsgType { Request, Response, ErrorMsg };
 
-enum class MethodType {
+enum MethodType {
   Invite,
   Register,
   Update,
@@ -38,6 +45,7 @@ enum class MethodType {
   Cancel,
   Ok200,
   Failure4xx,
+  OtherMethod,
   NullMethod
 };
 
@@ -52,8 +60,6 @@ enum class AppExceptionType {
   ProtocolError = 7,
   InvalidTransform = 8,
   InvalidProtocol = 9,
-  // FBThrift values.
-  // See https://github.com/facebook/fbthrift/blob/master/thrift/lib/cpp/TApplicationException.h#L52
   UnsupportedClientType = 10,
   LoadShedding = 11,
   Timeout = 12,
@@ -61,6 +67,48 @@ enum class AppExceptionType {
   ChecksumMismatch = 14,
   Interruption = 15,
 };
+
+class HeaderTypeMap {
+public:
+  HeaderType str2Header(const absl::string_view& header) const {
+    if (const auto& result = sip_header_type_map_.find(header);
+        result != sip_header_type_map_.end()) {
+      return result->second;
+    } else {
+      return HeaderType::Other;
+    }
+  }
+
+  HeaderType str2Header(const std::string& header) const {
+    if (const auto& result = sip_header_type_map_.find(header);
+        result != sip_header_type_map_.end()) {
+      return result->second;
+    } else {
+      return HeaderType::Other;
+    }
+  }
+
+private:
+  const absl::flat_hash_map<absl::string_view, HeaderType> sip_header_type_map_{
+      {"Call-ID", HeaderType::CallId},
+      {"Via", HeaderType::Via},
+      {"To", HeaderType::To},
+      {"From", HeaderType::From},
+      {"Contact", HeaderType::Contact},
+      {"Record-Route", HeaderType::RRoute},
+      {"CSeq", HeaderType::Cseq},
+      {"Route", HeaderType::Route},
+      {"Path", HeaderType::Path},
+      {"Event", HeaderType::Event},
+      {"Service-Route", HeaderType::SRoute},
+      {"WWW-Authenticate", HeaderType::WAuth},
+      {"Authorization", HeaderType::Auth},
+      {"TopLine", HeaderType::TopLine},
+      {"P-Nokia-Cookie-IP-Mapping", HeaderType::PCookieIPMap}};
+};
+
+using HeaderTypes = ConstSingleton<HeaderTypeMap>;
+extern std::vector<std::string> methodStr;
 
 } // namespace SipProxy
 } // namespace NetworkFilters

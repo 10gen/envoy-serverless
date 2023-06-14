@@ -11,6 +11,7 @@
 #include "test/mocks/upstream/cluster_manager.h"
 #include "test/mocks/upstream/transport_socket_match.h"
 
+using testing::AnyNumber;
 using testing::AtLeast;
 using testing::Eq;
 using testing::InSequence;
@@ -40,7 +41,7 @@ public:
   void setupSocketMatcher() {
     cm_.initializeThreadLocalClusters({"fake_cluster"});
     transport_socket_match_ = new NiceMock<Upstream::MockTransportSocketMatcher>(
-        Network::TransportSocketFactoryPtr(transport_socket_factory_));
+        Network::UpstreamTransportSocketFactoryPtr(transport_socket_factory_));
     cm_.thread_local_cluster_.cluster_.info_->transport_socket_matcher_.reset(
         transport_socket_match_);
   }
@@ -64,10 +65,12 @@ public:
     // kind we need to do DNS entries for.
     CustomClusterType cluster_type;
     cluster_type.set_name("envoy.clusters.dynamic_forward_proxy");
-    cm_.thread_local_cluster_.cluster_.info_->cluster_type_ = cluster_type;
+    cm_.thread_local_cluster_.cluster_.info_->cluster_type_ =
+        std::make_unique<const envoy::config::cluster::v3::Cluster::CustomClusterType>(
+            cluster_type);
 
     // Configure max pending to 1 so we can test circuit breaking.
-    cm_.thread_local_cluster_.cluster_.info_->resetResourceManager(0, 1, 0, 0, 0);
+    cm_.thread_local_cluster_.cluster_.info_->resetResourceManager(0, 1, 0, 0, 0, 100);
   }
 
   ~ProxyFilterTest() override {
@@ -87,7 +90,7 @@ public:
   Upstream::MockClusterManager cm_;
   ProxyFilterConfigSharedPtr filter_config_;
   std::unique_ptr<ProxyFilter> filter_;
-  Http::MockStreamDecoderFilterCallbacks callbacks_;
+  NiceMock<Http::MockStreamDecoderFilterCallbacks> callbacks_;
   Http::TestRequestHeaderMapImpl request_headers_{{":authority", "foo"}};
   NiceMock<Upstream::MockBasicResourceLimit> pending_requests_;
 };
@@ -103,12 +106,14 @@ TEST_F(ProxyFilterTest, HttpDefaultPort) {
   EXPECT_CALL(*dns_cache_manager_->dns_cache_, canCreateDnsRequest_())
       .WillOnce(Return(circuit_breakers_));
   EXPECT_CALL(*transport_socket_factory_, implementsSecureTransport()).WillOnce(Return(false));
+  EXPECT_CALL(callbacks_, route());
   EXPECT_CALL(callbacks_, streamInfo());
   EXPECT_CALL(callbacks_, dispatcher());
+  EXPECT_CALL(callbacks_, streamInfo());
 
   Extensions::Common::DynamicForwardProxy::MockLoadDnsCacheEntryHandle* handle =
       new Extensions::Common::DynamicForwardProxy::MockLoadDnsCacheEntryHandle();
-  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("foo"), 80, _))
+  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("foo"), 80, _, _))
       .WillOnce(Return(
           MockLoadDnsCacheEntryResult{LoadDnsCacheEntryStatus::Loading, handle, absl::nullopt}));
   EXPECT_EQ(Http::FilterHeadersStatus::StopAllIterationAndWatermark,
@@ -129,12 +134,14 @@ TEST_F(ProxyFilterTest, HttpsDefaultPort) {
   EXPECT_CALL(*dns_cache_manager_->dns_cache_, canCreateDnsRequest_())
       .WillOnce(Return(circuit_breakers_));
   EXPECT_CALL(*transport_socket_factory_, implementsSecureTransport()).WillOnce(Return(true));
+  EXPECT_CALL(callbacks_, route());
   EXPECT_CALL(callbacks_, streamInfo());
   EXPECT_CALL(callbacks_, dispatcher());
+  EXPECT_CALL(callbacks_, streamInfo());
 
   Extensions::Common::DynamicForwardProxy::MockLoadDnsCacheEntryHandle* handle =
       new Extensions::Common::DynamicForwardProxy::MockLoadDnsCacheEntryHandle();
-  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("foo"), 443, _))
+  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("foo"), 443, _, _))
       .WillOnce(Return(
           MockLoadDnsCacheEntryResult{LoadDnsCacheEntryStatus::Loading, handle, absl::nullopt}));
   EXPECT_EQ(Http::FilterHeadersStatus::StopAllIterationAndWatermark,
@@ -155,10 +162,12 @@ TEST_F(ProxyFilterTest, CacheOverflow) {
   EXPECT_CALL(*dns_cache_manager_->dns_cache_, canCreateDnsRequest_())
       .WillOnce(Return(circuit_breakers_));
   EXPECT_CALL(*transport_socket_factory_, implementsSecureTransport()).WillOnce(Return(true));
+  EXPECT_CALL(callbacks_, route());
   EXPECT_CALL(callbacks_, streamInfo());
   EXPECT_CALL(callbacks_, dispatcher());
+  EXPECT_CALL(callbacks_, streamInfo());
 
-  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("foo"), 443, _))
+  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("foo"), 443, _, _))
       .WillOnce(Return(
           MockLoadDnsCacheEntryResult{LoadDnsCacheEntryStatus::Overflow, nullptr, absl::nullopt}));
   EXPECT_CALL(callbacks_, sendLocalReply(Http::Code::ServiceUnavailable, Eq("DNS cache overflow"),
@@ -182,11 +191,13 @@ TEST_F(ProxyFilterTest, CircuitBreakerOverflow) {
   EXPECT_CALL(*dns_cache_manager_->dns_cache_, canCreateDnsRequest_())
       .WillOnce(Return(circuit_breakers_));
   EXPECT_CALL(*transport_socket_factory_, implementsSecureTransport()).WillOnce(Return(true));
+  EXPECT_CALL(callbacks_, route());
   EXPECT_CALL(callbacks_, streamInfo());
   EXPECT_CALL(callbacks_, dispatcher());
+  EXPECT_CALL(callbacks_, streamInfo());
   Extensions::Common::DynamicForwardProxy::MockLoadDnsCacheEntryHandle* handle =
       new Extensions::Common::DynamicForwardProxy::MockLoadDnsCacheEntryHandle();
-  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("foo"), 443, _))
+  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("foo"), 443, _, _))
       .WillOnce(Return(
           MockLoadDnsCacheEntryResult{LoadDnsCacheEntryStatus::Loading, handle, absl::nullopt}));
   EXPECT_EQ(Http::FilterHeadersStatus::StopAllIterationAndWatermark,
@@ -224,9 +235,11 @@ TEST_F(ProxyFilterTest, CircuitBreakerOverflowWithDnsCacheResourceManager) {
   EXPECT_CALL(*transport_socket_factory_, implementsSecureTransport()).WillOnce(Return(true));
   Extensions::Common::DynamicForwardProxy::MockLoadDnsCacheEntryHandle* handle =
       new Extensions::Common::DynamicForwardProxy::MockLoadDnsCacheEntryHandle();
+  EXPECT_CALL(callbacks_, route());
   EXPECT_CALL(callbacks_, streamInfo());
   EXPECT_CALL(callbacks_, dispatcher());
-  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("foo"), 443, _))
+  EXPECT_CALL(callbacks_, streamInfo());
+  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("foo"), 443, _, _))
       .WillOnce(Return(
           MockLoadDnsCacheEntryResult{LoadDnsCacheEntryStatus::Loading, handle, absl::nullopt}));
   EXPECT_EQ(Http::FilterHeadersStatus::StopAllIterationAndWatermark,
@@ -247,8 +260,8 @@ TEST_F(ProxyFilterTest, CircuitBreakerOverflowWithDnsCacheResourceManager) {
             filter2->decodeHeaders(request_headers_, false));
 
   // Cluster circuit breaker overflow counter won't be incremented.
-  EXPECT_EQ(0,
-            cm_.thread_local_cluster_.cluster_.info_->stats_.upstream_rq_pending_overflow_.value());
+  EXPECT_EQ(0, cm_.thread_local_cluster_.cluster_.info_->traffic_stats_
+                   ->upstream_rq_pending_overflow_.value());
   filter2->onDestroy();
   EXPECT_CALL(*handle, onDestroy());
   filter_->onDestroy();
@@ -273,7 +286,7 @@ TEST_F(ProxyFilterTest, NoCluster) {
 
 // No cluster type leads to skipping DNS lookups.
 TEST_F(ProxyFilterTest, NoClusterType) {
-  cm_.thread_local_cluster_.cluster_.info_->cluster_type_ = absl::nullopt;
+  cm_.thread_local_cluster_.cluster_.info_->cluster_type_ = nullptr;
 
   InSequence s;
 
@@ -286,7 +299,8 @@ TEST_F(ProxyFilterTest, NoClusterType) {
 TEST_F(ProxyFilterTest, NonDynamicForwardProxy) {
   CustomClusterType cluster_type;
   cluster_type.set_name("envoy.cluster.static");
-  cm_.thread_local_cluster_.cluster_.info_->cluster_type_ = cluster_type;
+  cm_.thread_local_cluster_.cluster_.info_->cluster_type_ =
+      std::make_unique<const envoy::config::cluster::v3::Cluster::CustomClusterType>(cluster_type);
 
   InSequence s;
 
@@ -311,12 +325,12 @@ TEST_F(ProxyFilterTest, HostRewrite) {
   EXPECT_CALL(*transport_socket_factory_, implementsSecureTransport()).WillOnce(Return(false));
   Extensions::Common::DynamicForwardProxy::MockLoadDnsCacheEntryHandle* handle =
       new Extensions::Common::DynamicForwardProxy::MockLoadDnsCacheEntryHandle();
-  EXPECT_CALL(*callbacks_.route_,
-              mostSpecificPerFilterConfig("envoy.filters.http.dynamic_forward_proxy"))
-      .WillOnce(Return(&config));
+  EXPECT_CALL(callbacks_, route());
+  EXPECT_CALL(*callbacks_.route_, mostSpecificPerFilterConfig(_)).WillOnce(Return(&config));
   EXPECT_CALL(callbacks_, streamInfo());
   EXPECT_CALL(callbacks_, dispatcher());
-  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("bar"), 80, _))
+  EXPECT_CALL(callbacks_, streamInfo());
+  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("bar"), 80, _, _))
       .WillOnce(Return(
           MockLoadDnsCacheEntryResult{LoadDnsCacheEntryStatus::Loading, handle, absl::nullopt}));
   EXPECT_EQ(Http::FilterHeadersStatus::StopAllIterationAndWatermark,
@@ -342,12 +356,12 @@ TEST_F(ProxyFilterTest, HostRewriteViaHeader) {
   EXPECT_CALL(*transport_socket_factory_, implementsSecureTransport()).WillOnce(Return(false));
   Extensions::Common::DynamicForwardProxy::MockLoadDnsCacheEntryHandle* handle =
       new Extensions::Common::DynamicForwardProxy::MockLoadDnsCacheEntryHandle();
-  EXPECT_CALL(*callbacks_.route_,
-              mostSpecificPerFilterConfig("envoy.filters.http.dynamic_forward_proxy"))
-      .WillOnce(Return(&config));
+  EXPECT_CALL(callbacks_, route());
+  EXPECT_CALL(*callbacks_.route_, mostSpecificPerFilterConfig(_)).WillOnce(Return(&config));
   EXPECT_CALL(callbacks_, streamInfo());
   EXPECT_CALL(callbacks_, dispatcher());
-  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("bar:82"), 80, _))
+  EXPECT_CALL(callbacks_, streamInfo());
+  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("bar:82"), 80, _, _))
       .WillOnce(Return(
           MockLoadDnsCacheEntryResult{LoadDnsCacheEntryStatus::Loading, handle, absl::nullopt}));
 
@@ -380,7 +394,8 @@ TEST_F(UpstreamResolvedHostFilterStateHelper, AddResolvedHostFilterStateMetadata
   Upstream::ResourceAutoIncDec* circuit_breakers_(
       new Upstream::ResourceAutoIncDec(pending_requests_));
 
-  EXPECT_CALL(callbacks_, streamInfo());
+  EXPECT_CALL(callbacks_, streamInfo()).Times(AnyNumber());
+  EXPECT_CALL(callbacks_, dispatcher()).Times(AnyNumber());
   auto& filter_state = callbacks_.streamInfo().filterState();
 
   InSequence s;
@@ -394,11 +409,13 @@ TEST_F(UpstreamResolvedHostFilterStateHelper, AddResolvedHostFilterStateMetadata
   EXPECT_CALL(*dns_cache_manager_->dns_cache_, canCreateDnsRequest_())
       .WillOnce(Return(circuit_breakers_));
   EXPECT_CALL(*transport_socket_factory_, implementsSecureTransport()).WillOnce(Return(false));
+  EXPECT_CALL(callbacks_, route());
   EXPECT_CALL(callbacks_, streamInfo());
   EXPECT_CALL(callbacks_, dispatcher());
 
-  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("foo"), 80, _))
-      .WillOnce(Invoke([&](absl::string_view, uint16_t, ProxyFilter::LoadDnsCacheEntryCallbacks&) {
+  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("foo"), 80, _, _))
+      .WillOnce(Invoke([&](absl::string_view, uint16_t, bool,
+                           ProxyFilter::LoadDnsCacheEntryCallbacks&) {
         return MockLoadDnsCacheEntryResult{LoadDnsCacheEntryStatus::InCache, nullptr, host_info};
       }));
 
@@ -409,11 +426,7 @@ TEST_F(UpstreamResolvedHostFilterStateHelper, AddResolvedHostFilterStateMetadata
             return host_info;
           }));
 
-  EXPECT_CALL(*host_info, address());
-
-  EXPECT_CALL(callbacks_, streamInfo());
-  EXPECT_CALL(callbacks_, streamInfo());
-  EXPECT_CALL(callbacks_, dispatcher());
+  EXPECT_CALL(*host_info, address()).Times(2).WillRepeatedly(Return(host_info->address_));
 
   // Host was resolved successfully, so continue filter iteration.
   EXPECT_EQ(Http::FilterHeadersStatus::Continue, filter_->decodeHeaders(request_headers_, false));
@@ -431,7 +444,8 @@ TEST_F(UpstreamResolvedHostFilterStateHelper, UpdateResolvedHostFilterStateMetad
   Upstream::ResourceAutoIncDec* circuit_breakers_(
       new Upstream::ResourceAutoIncDec(pending_requests_));
 
-  EXPECT_CALL(callbacks_, streamInfo()).Times(testing::AnyNumber());
+  EXPECT_CALL(callbacks_, streamInfo()).Times(AnyNumber());
+  EXPECT_CALL(callbacks_, dispatcher()).Times(AnyNumber());
 
   // Pre-populate the filter state with an address.
   auto& filter_state = callbacks_.streamInfo().filterState();
@@ -453,11 +467,13 @@ TEST_F(UpstreamResolvedHostFilterStateHelper, UpdateResolvedHostFilterStateMetad
   EXPECT_CALL(*dns_cache_manager_->dns_cache_, canCreateDnsRequest_())
       .WillOnce(Return(circuit_breakers_));
   EXPECT_CALL(*transport_socket_factory_, implementsSecureTransport()).WillOnce(Return(false));
+  EXPECT_CALL(callbacks_, route());
   EXPECT_CALL(callbacks_, streamInfo());
   EXPECT_CALL(callbacks_, dispatcher());
 
-  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("foo"), 80, _))
-      .WillOnce(Invoke([&](absl::string_view, uint16_t, ProxyFilter::LoadDnsCacheEntryCallbacks&) {
+  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("foo"), 80, _, _))
+      .WillOnce(Invoke([&](absl::string_view, uint16_t, bool,
+                           ProxyFilter::LoadDnsCacheEntryCallbacks&) {
         return MockLoadDnsCacheEntryResult{LoadDnsCacheEntryStatus::InCache, nullptr, host_info};
       }));
 
@@ -468,11 +484,7 @@ TEST_F(UpstreamResolvedHostFilterStateHelper, UpdateResolvedHostFilterStateMetad
             return host_info;
           }));
 
-  EXPECT_CALL(*host_info, address());
-
-  EXPECT_CALL(callbacks_, dispatcher());
-  EXPECT_CALL(callbacks_, streamInfo());
-  EXPECT_CALL(callbacks_, streamInfo());
+  EXPECT_CALL(*host_info, address()).Times(2).WillRepeatedly(Return(host_info->address_));
 
   // Host was resolved successfully, so continue filter iteration.
   EXPECT_EQ(Http::FilterHeadersStatus::Continue, filter_->decodeHeaders(request_headers_, false));
@@ -483,13 +495,13 @@ TEST_F(UpstreamResolvedHostFilterStateHelper, UpdateResolvedHostFilterStateMetad
   EXPECT_TRUE(
       callbacks_.streamInfo().downstreamTiming().getValue(ProxyFilter::DNS_END).has_value());
 
-  const StreamInfo::UpstreamAddress& updated_address_obj =
+  const StreamInfo::UpstreamAddress* updated_address_obj =
       filter_state->getDataReadOnly<StreamInfo::UpstreamAddress>(
           StreamInfo::UpstreamAddress::key());
 
   // Verify the data
-  EXPECT_TRUE(updated_address_obj.address_);
-  EXPECT_EQ(updated_address_obj.address_->asStringView(), host_info->address_->asStringView());
+  EXPECT_TRUE(updated_address_obj->address_);
+  EXPECT_EQ(updated_address_obj->address_->asStringView(), host_info->address_->asStringView());
 
   filter_->onDestroy();
 }
@@ -500,9 +512,8 @@ TEST_F(UpstreamResolvedHostFilterStateHelper, IgnoreFilterStateMetadataNullAddre
   Upstream::ResourceAutoIncDec* circuit_breakers_(
       new Upstream::ResourceAutoIncDec(pending_requests_));
 
-  EXPECT_CALL(callbacks_, streamInfo());
-  auto& filter_state = callbacks_.streamInfo().filterState();
-
+  EXPECT_CALL(callbacks_, streamInfo()).Times(AnyNumber());
+  EXPECT_CALL(callbacks_, dispatcher()).Times(AnyNumber());
   InSequence s;
 
   // Setup test host
@@ -514,10 +525,10 @@ TEST_F(UpstreamResolvedHostFilterStateHelper, IgnoreFilterStateMetadataNullAddre
   EXPECT_CALL(*dns_cache_manager_->dns_cache_, canCreateDnsRequest_())
       .WillOnce(Return(circuit_breakers_));
   EXPECT_CALL(*transport_socket_factory_, implementsSecureTransport()).WillOnce(Return(false));
-  EXPECT_CALL(callbacks_, streamInfo());
-  EXPECT_CALL(callbacks_, dispatcher());
-  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("foo"), 80, _))
-      .WillOnce(Invoke([&](absl::string_view, uint16_t, ProxyFilter::LoadDnsCacheEntryCallbacks&) {
+  EXPECT_CALL(callbacks_, route());
+  EXPECT_CALL(*dns_cache_manager_->dns_cache_, loadDnsCacheEntry_(Eq("foo"), 80, _, _))
+      .WillOnce(Invoke([&](absl::string_view, uint16_t, bool,
+                           ProxyFilter::LoadDnsCacheEntryCallbacks&) {
         return MockLoadDnsCacheEntryResult{LoadDnsCacheEntryStatus::InCache, nullptr, host_info};
       }));
 
@@ -529,14 +540,13 @@ TEST_F(UpstreamResolvedHostFilterStateHelper, IgnoreFilterStateMetadataNullAddre
           }));
 
   EXPECT_CALL(*host_info, address());
-  EXPECT_CALL(callbacks_, streamInfo());
-  EXPECT_CALL(callbacks_, dispatcher());
-
-  EXPECT_EQ(Http::FilterHeadersStatus::Continue, filter_->decodeHeaders(request_headers_, false));
-
-  // We do not expect FilterState to be populated
-  EXPECT_FALSE(
-      filter_state->hasData<StreamInfo::UpstreamAddress>(StreamInfo::UpstreamAddress::key()));
+  EXPECT_CALL(callbacks_,
+              sendLocalReply(Http::Code::ServiceUnavailable, Eq("DNS resolution failure"), _, _,
+                             Eq("dns_resolution_failure")));
+  EXPECT_CALL(callbacks_, encodeHeaders_(_, false));
+  EXPECT_CALL(callbacks_, encodeData(_, true));
+  EXPECT_EQ(Http::FilterHeadersStatus::StopIteration,
+            filter_->decodeHeaders(request_headers_, false));
 
   filter_->onDestroy();
 }

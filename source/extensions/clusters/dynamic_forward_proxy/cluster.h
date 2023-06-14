@@ -7,7 +7,7 @@
 #include "envoy/http/conn_pool.h"
 
 #include "source/common/upstream/cluster_factory_impl.h"
-#include "source/common/upstream/logical_host.h"
+#include "source/extensions/clusters/common/logical_host.h"
 #include "source/extensions/common/dynamic_forward_proxy/dns_cache.h"
 
 namespace Envoy {
@@ -18,13 +18,12 @@ namespace DynamicForwardProxy {
 class Cluster : public Upstream::BaseDynamicClusterImpl,
                 public Extensions::Common::DynamicForwardProxy::DnsCache::UpdateCallbacks {
 public:
-  Cluster(const envoy::config::cluster::v3::Cluster& cluster,
+  Cluster(Server::Configuration::ServerFactoryContext& server_context,
+          const envoy::config::cluster::v3::Cluster& cluster,
           const envoy::extensions::clusters::dynamic_forward_proxy::v3::ClusterConfig& config,
-          Runtime::Loader& runtime,
+          Upstream::ClusterFactoryContext& context, Runtime::Loader& runtime,
           Extensions::Common::DynamicForwardProxy::DnsCacheManagerFactory& cache_manager_factory,
-          const LocalInfo::LocalInfo& local_info,
-          Server::Configuration::TransportSocketFactoryContextImpl& factory_context,
-          Stats::ScopePtr&& stats_scope, bool added_via_api);
+          const LocalInfo::LocalInfo& local_info, bool added_via_api);
 
   // Upstream::Cluster
   Upstream::Cluster::InitializePhase initializePhase() const override {
@@ -39,6 +38,9 @@ public:
       const std::string& host,
       const Extensions::Common::DynamicForwardProxy::DnsHostInfoSharedPtr& host_info) override;
   void onDnsHostRemove(const std::string& host) override;
+  void onDnsResolutionComplete(const std::string&,
+                               const Extensions::Common::DynamicForwardProxy::DnsHostInfoSharedPtr&,
+                               Network::DnsResolver::ResolutionStatus) override {}
 
   bool allowCoalescedConnections() const { return allow_coalesced_connections_; }
 
@@ -108,6 +110,7 @@ private:
 
     // Upstream::LoadBalancerFactory
     Upstream::LoadBalancerPtr create() override { return std::make_unique<LoadBalancer>(cluster_); }
+    Upstream::LoadBalancerPtr create(Upstream::LoadBalancerParams) override { return create(); }
 
   private:
     Cluster& cluster_;
@@ -163,11 +166,10 @@ public:
 private:
   std::pair<Upstream::ClusterImplBaseSharedPtr, Upstream::ThreadAwareLoadBalancerPtr>
   createClusterWithConfig(
+      Server::Configuration::ServerFactoryContext& server_context,
       const envoy::config::cluster::v3::Cluster& cluster,
       const envoy::extensions::clusters::dynamic_forward_proxy::v3::ClusterConfig& proto_config,
-      Upstream::ClusterFactoryContext& context,
-      Server::Configuration::TransportSocketFactoryContextImpl& socket_factory_context,
-      Stats::ScopePtr&& stats_scope) override;
+      Upstream::ClusterFactoryContext& context) override;
 };
 
 DECLARE_FACTORY(ClusterFactory);

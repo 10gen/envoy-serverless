@@ -1,8 +1,10 @@
 #pragma once
 
+#include "envoy/http/http_server_properties_cache.h"
+
 #include "source/common/quic/envoy_quic_client_connection.h"
+#include "source/common/quic/envoy_quic_client_crypto_stream_factory.h"
 #include "source/common/quic/envoy_quic_client_stream.h"
-#include "source/common/quic/envoy_quic_crypto_stream_factory.h"
 #include "source/common/quic/quic_filter_manager_connection_impl.h"
 #include "source/common/quic/quic_stat_names.h"
 
@@ -10,8 +12,6 @@
 
 namespace Envoy {
 namespace Quic {
-
-class EnvoyQuicClientSession;
 
 // Act as a Network::ClientConnection to ClientCodec.
 // TODO(danzh) This class doesn't need to inherit Network::FilterManager
@@ -23,15 +23,16 @@ class EnvoyQuicClientSession : public QuicFilterManagerConnectionImpl,
                                public Network::ClientConnection,
                                public PacketsToReadDelegate {
 public:
-  EnvoyQuicClientSession(const quic::QuicConfig& config,
-                         const quic::ParsedQuicVersionVector& supported_versions,
-                         std::unique_ptr<EnvoyQuicClientConnection> connection,
-                         const quic::QuicServerId& server_id,
-                         std::shared_ptr<quic::QuicCryptoClientConfig> crypto_config,
-                         quic::QuicClientPushPromiseIndex* push_promise_index,
-                         Event::Dispatcher& dispatcher, uint32_t send_buffer_limit,
-                         EnvoyQuicCryptoClientStreamFactoryInterface& crypto_stream_factory,
-                         QuicStatNames& quic_stat_names, Stats::Scope& scope);
+  EnvoyQuicClientSession(
+      const quic::QuicConfig& config, const quic::ParsedQuicVersionVector& supported_versions,
+      std::unique_ptr<EnvoyQuicClientConnection> connection, const quic::QuicServerId& server_id,
+      std::shared_ptr<quic::QuicCryptoClientConfig> crypto_config,
+      quic::QuicClientPushPromiseIndex* push_promise_index, Event::Dispatcher& dispatcher,
+      uint32_t send_buffer_limit,
+      EnvoyQuicCryptoClientStreamFactoryInterface& crypto_stream_factory,
+      QuicStatNames& quic_stat_names, OptRef<Http::HttpServerPropertiesCache> rtt_cache,
+      Stats::Scope& scope,
+      const Network::TransportSocketOptionsConstSharedPtr& transport_socket_options);
 
   ~EnvoyQuicClientSession() override;
 
@@ -60,6 +61,15 @@ public:
   void MaybeSendRstStreamFrame(quic::QuicStreamId id, quic::QuicResetStreamError error,
                                quic::QuicStreamOffset bytes_written) override;
   void OnRstStream(const quic::QuicRstStreamFrame& frame) override;
+  void OnNewEncryptionKeyAvailable(quic::EncryptionLevel level,
+                                   std::unique_ptr<quic::QuicEncrypter> encrypter) override;
+
+  quic::HttpDatagramSupport LocalHttpDatagramSupport() override {
+    // TODO(https://github.com/envoyproxy/envoy/issues/23564): Http3 Datagram support should be
+    // turned on by returning quic::HttpDatagramSupport::kRfc once the CONNECT-UDP support work is
+    // completed.
+    return quic::HttpDatagramSupport::kNone;
+  }
 
   // quic::QuicSpdyClientSessionBase
   bool ShouldKeepConnectionAlive() const override;
@@ -67,7 +77,7 @@ public:
   void OnProofVerifyDetailsAvailable(const quic::ProofVerifyDetails& verify_details) override;
 
   // PacketsToReadDelegate
-  size_t numPacketsExpectedPerEventLoop() override {
+  size_t numPacketsExpectedPerEventLoop() const override {
     // Do one round of reading per active stream, or to see if there's a new
     // active stream.
     return std::max<size_t>(1, GetNumActiveStreams()) * Network::NUM_DATAGRAMS_PER_RECEIVE;
@@ -78,6 +88,9 @@ public:
 
   // Notify any registered connection pool when new streams are available.
   void OnCanCreateNewOutgoingStream(bool) override;
+
+  void OnServerPreferredAddressAvailable(
+      const quic::QuicSocketAddress& server_preferred_address) override;
 
   using quic::QuicSpdyClientSession::PerformActionOnActiveStreams;
 
@@ -109,8 +122,10 @@ private:
   std::shared_ptr<quic::QuicCryptoClientConfig> crypto_config_;
   EnvoyQuicCryptoClientStreamFactoryInterface& crypto_stream_factory_;
   QuicStatNames& quic_stat_names_;
+  OptRef<Http::HttpServerPropertiesCache> rtt_cache_;
   Stats::Scope& scope_;
   bool disable_keepalive_{false};
+  Network::TransportSocketOptionsConstSharedPtr transport_socket_options_;
 };
 
 } // namespace Quic

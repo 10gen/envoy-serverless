@@ -2,6 +2,7 @@
 
 #include "envoy/config/endpoint/v3/endpoint.pb.h"
 #include "envoy/config/endpoint/v3/endpoint.pb.validate.h"
+#include "envoy/config/xds_config_tracker.h"
 #include "envoy/event/timer.h"
 #include "envoy/service/discovery/v3/discovery.pb.h"
 
@@ -15,6 +16,7 @@
 #include "test/common/stats/stat_test_utility.h"
 #include "test/config/v2_link_hacks.h"
 #include "test/mocks/common.h"
+#include "test/mocks/config/custom_config_validators.h"
 #include "test/mocks/config/mocks.h"
 #include "test/mocks/event/mocks.h"
 #include "test/mocks/grpc/mocks.h"
@@ -30,7 +32,6 @@
 #include "gtest/gtest.h"
 
 using testing::_;
-using testing::DoAll;
 using testing::InSequence;
 using testing::Invoke;
 using testing::NiceMock;
@@ -50,25 +51,35 @@ class NewGrpcMuxImplTestBase : public testing::TestWithParam<LegacyOrUnified> {
 public:
   NewGrpcMuxImplTestBase(LegacyOrUnified legacy_or_unified)
       : async_client_(new Grpc::MockAsyncClient()),
-        control_plane_stats_(Utility::generateControlPlaneStats(stats_)),
+        config_validators_(std::make_unique<NiceMock<MockCustomConfigValidators>>()),
+        resource_decoder_(std::make_shared<TestUtility::TestOpaqueResourceDecoderImpl<
+                              envoy::config::endpoint::v3::ClusterLoadAssignment>>("cluster_name")),
+        control_plane_stats_(Utility::generateControlPlaneStats(*stats_.rootScope())),
         control_plane_connected_state_(
             stats_.gauge("control_plane.connected_state", Stats::Gauge::ImportMode::NeverImport)),
         should_use_unified_(legacy_or_unified == LegacyOrUnified::Unified) {}
 
   void setup() {
+    auto backoff_strategy = std::make_unique<JitteredExponentialBackOffStrategy>(
+        SubscriptionFactory::RetryInitialDelayMs, SubscriptionFactory::RetryMaxDelayMs, random_);
+
     if (isUnifiedMuxTest()) {
       grpc_mux_ = std::make_unique<XdsMux::GrpcMuxDelta>(
           std::unique_ptr<Grpc::MockAsyncClient>(async_client_), dispatcher_,
           *Protobuf::DescriptorPool::generated_pool()->FindMethodByName(
               "envoy.service.discovery.v2.AggregatedDiscoveryService.StreamAggregatedResources"),
-          random_, stats_, rate_limit_settings_, local_info_, false);
+          random_, *stats_.rootScope(), rate_limit_settings_, local_info_, false,
+          std::move(config_validators_), std::move(backoff_strategy),
+          /*xds_config_tracker=*/XdsConfigTrackerOptRef());
       return;
     }
     grpc_mux_ = std::make_unique<NewGrpcMuxImpl>(
         std::unique_ptr<Grpc::MockAsyncClient>(async_client_), dispatcher_,
         *Protobuf::DescriptorPool::generated_pool()->FindMethodByName(
             "envoy.service.discovery.v3.AggregatedDiscoveryService.StreamAggregatedResources"),
-        random_, stats_, rate_limit_settings_, local_info_);
+        random_, *stats_.rootScope(), rate_limit_settings_, local_info_,
+        std::move(config_validators_), std::move(backoff_strategy),
+        /*xds_config_tracker=*/XdsConfigTrackerOptRef());
   }
 
   void expectSendMessage(const std::string& type_url,
@@ -151,11 +162,11 @@ public:
   NiceMock<Random::MockRandomGenerator> random_;
   Grpc::MockAsyncClient* async_client_;
   NiceMock<Grpc::MockAsyncStream> async_stream_;
+  CustomConfigValidatorsPtr config_validators_;
   NiceMock<LocalInfo::MockLocalInfo> local_info_;
   std::unique_ptr<GrpcMux> grpc_mux_;
   NiceMock<Config::MockSubscriptionCallbacks> callbacks_;
-  TestUtility::TestOpaqueResourceDecoderImpl<envoy::config::endpoint::v3::ClusterLoadAssignment>
-      resource_decoder_{"cluster_name"};
+  OpaqueResourceDecoderSharedPtr resource_decoder_;
   Stats::TestUtil::TestStore stats_;
   Envoy::Config::RateLimitSettings rate_limit_settings_;
   ControlPlaneStats control_plane_stats_;

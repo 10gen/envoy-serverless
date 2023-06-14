@@ -36,10 +36,11 @@ GraphiteStatsdSinkFactory::createStatsSink(const Protobuf::Message& config,
                                                            true, statsd_sink.prefix(), max_bytes,
                                                            Common::Statsd::getGraphiteTagFormat());
   }
-  default:
-    // Verified by schema.
-    NOT_REACHED_GCOVR_EXCL_LINE;
+  case envoy::extensions::stat_sinks::graphite_statsd::v3::GraphiteStatsdSink::StatsdSpecifierCase::
+      STATSD_SPECIFIER_NOT_SET:
+    break;
   }
+  throw EnvoyException("unexpected statsd specifier enum");
 }
 
 ProtobufTypes::MessagePtr GraphiteStatsdSinkFactory::createEmptyConfigProto() {
@@ -51,8 +52,8 @@ std::string GraphiteStatsdSinkFactory::name() const { return "envoy.stat_sinks.g
 /**
  * Static registration for the statsd sink factory. @see RegisterFactory.
  */
-REGISTER_FACTORY(GraphiteStatsdSinkFactory,
-                 Server::Configuration::StatsSinkFactory){"envoy.graphite_statsd"};
+LEGACY_REGISTER_FACTORY(GraphiteStatsdSinkFactory, Server::Configuration::StatsSinkFactory,
+                        "envoy.graphite_statsd");
 
 } // namespace GraphiteStatsd
 } // namespace StatSinks

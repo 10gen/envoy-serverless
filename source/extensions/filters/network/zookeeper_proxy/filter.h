@@ -12,7 +12,7 @@
 #include "envoy/stats/stats_macros.h"
 
 #include "source/common/common/logger.h"
-#include "source/common/stats/symbol_table_impl.h"
+#include "source/common/stats/symbol_table.h"
 #include "source/extensions/filters/network/zookeeper_proxy/decoder.h"
 
 namespace Envoy {
@@ -49,6 +49,7 @@ namespace ZooKeeperProxy {
   COUNTER(close_rq)                                                                                \
   COUNTER(setauth_rq)                                                                              \
   COUNTER(setwatches_rq)                                                                           \
+  COUNTER(setwatches2_rq)                                                                          \
   COUNTER(checkwatches_rq)                                                                         \
   COUNTER(removewatches_rq)                                                                        \
   COUNTER(check_rq)                                                                                \
@@ -76,6 +77,7 @@ namespace ZooKeeperProxy {
   COUNTER(close_resp)                                                                              \
   COUNTER(setauth_resp)                                                                            \
   COUNTER(setwatches_resp)                                                                         \
+  COUNTER(setwatches2_resp)                                                                        \
   COUNTER(checkwatches_resp)                                                                       \
   COUNTER(removewatches_resp)                                                                      \
   COUNTER(check_resp)                                                                              \
@@ -166,6 +168,7 @@ public:
   void onMultiRequest() override;
   void onReconfigRequest() override;
   void onSetWatchesRequest() override;
+  void onSetWatches2Request() override;
   void onCheckWatchesRequest(const std::string& path, int32_t type) override;
   void onRemoveWatchesRequest(const std::string& path, int32_t type) override;
   void onGetEphemeralsRequest(const std::string& path) override;

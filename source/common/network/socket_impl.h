@@ -53,16 +53,26 @@ public:
   absl::optional<uint64_t> connectionID() const override { return connection_id_; }
   void setConnectionID(uint64_t id) override { connection_id_ = id; }
   absl::optional<absl::string_view> interfaceName() const override { return interface_name_; }
-  void setInterfaceName(absl::string_view interface_name) override {
-    interface_name_ = std::string(interface_name);
+  void enableSettingInterfaceName(const bool enable) override {
+    allow_syscall_for_interface_name_ = enable;
+  }
+  void maybeSetInterfaceName(IoHandle& io_handle) override {
+    if (allow_syscall_for_interface_name_) {
+      interface_name_ = io_handle.interfaceName();
+    }
   }
   Ssl::ConnectionInfoConstSharedPtr sslConnection() const override { return ssl_info_; }
   void setSslConnection(const Ssl::ConnectionInfoConstSharedPtr& ssl_connection_info) override {
-    ASSERT(!ssl_info_);
     ssl_info_ = ssl_connection_info;
   }
   absl::string_view ja3Hash() const override { return ja3_hash_; }
   void setJA3Hash(const absl::string_view ja3_hash) override { ja3_hash_ = std::string(ja3_hash); }
+  const absl::optional<std::chrono::milliseconds>& roundTripTime() const override {
+    return round_trip_time_;
+  }
+  void setRoundTripTime(std::chrono::milliseconds round_trip_time) override {
+    round_trip_time_ = round_trip_time;
+  }
 
 private:
   Address::InstanceConstSharedPtr local_address_;
@@ -71,9 +81,11 @@ private:
   Address::InstanceConstSharedPtr direct_remote_address_;
   std::string server_name_;
   absl::optional<uint64_t> connection_id_;
+  bool allow_syscall_for_interface_name_{false};
   absl::optional<std::string> interface_name_;
   Ssl::ConnectionInfoConstSharedPtr ssl_info_;
   std::string ja3_hash_;
+  absl::optional<std::chrono::milliseconds> round_trip_time_;
 };
 
 class SocketImpl : public virtual Socket {

@@ -62,35 +62,96 @@ TEST_F(EvironmentCredentialsProviderTest, NoSessionToken) {
   EXPECT_FALSE(credentials.sessionToken().has_value());
 }
 
+class MessageMatcher : public testing::MatcherInterface<Http::RequestMessage&> {
+public:
+  explicit MessageMatcher(const Http::TestRequestHeaderMapImpl& expected_headers)
+      : expected_headers_(expected_headers) {}
+
+  bool MatchAndExplain(Http::RequestMessage& message,
+                       testing::MatchResultListener* result_listener) const override {
+    const bool equal = TestUtility::headerMapEqualIgnoreOrder(message.headers(), expected_headers_);
+    if (!equal) {
+      *result_listener << "\n"
+                       << TestUtility::addLeftAndRightPadding("Expected header map:") << "\n"
+                       << expected_headers_
+                       << TestUtility::addLeftAndRightPadding("is not equal to actual header map:")
+                       << "\n"
+                       << message.headers()
+                       << TestUtility::addLeftAndRightPadding("") // line full of padding
+                       << "\n";
+    }
+    return equal;
+  }
+
+  void DescribeTo(::std::ostream* os) const override { *os << "Message matches"; }
+
+  void DescribeNegationTo(::std::ostream* os) const override { *os << "Message does not match"; }
+
+private:
+  const Http::TestRequestHeaderMapImpl expected_headers_;
+};
+
+testing::Matcher<Http::RequestMessage&>
+messageMatches(const Http::TestRequestHeaderMapImpl& expected_headers) {
+  return testing::MakeMatcher(new MessageMatcher(expected_headers));
+}
+
 class InstanceProfileCredentialsProviderTest : public testing::Test {
 public:
   InstanceProfileCredentialsProviderTest()
       : api_(Api::createApiForTest(time_system_)),
-        provider_(*api_,
-                  [this](const std::string& host, const std::string& path,
-                         const std::string& auth_token) -> absl::optional<std::string> {
-                    return this->fetcher_.fetch(host, path, auth_token);
-                  }) {}
+        provider_(*api_, [this](Http::RequestMessage& message) -> absl::optional<std::string> {
+          return this->fetch_metadata_.fetch(message);
+        }) {}
+
+  void expectSessionToken(const absl::optional<std::string>& token) {
+    Http::TestRequestHeaderMapImpl headers{{":path", "/latest/api/token"},
+                                           {":authority", "169.254.169.254:80"},
+                                           {":method", "PUT"},
+                                           {"X-aws-ec2-metadata-token-ttl-seconds", "21600"}};
+    EXPECT_CALL(fetch_metadata_, fetch(messageMatches(headers))).WillOnce(Return(token));
+  }
 
   void expectCredentialListing(const absl::optional<std::string>& listing) {
-    EXPECT_CALL(fetcher_,
-                fetch("169.254.169.254:80", "/latest/meta-data/iam/security-credentials", _))
-        .WillOnce(Return(listing));
+    Http::TestRequestHeaderMapImpl headers{{":path", "/latest/meta-data/iam/security-credentials"},
+                                           {":authority", "169.254.169.254:80"},
+                                           {":method", "GET"}};
+    EXPECT_CALL(fetch_metadata_, fetch(messageMatches(headers))).WillOnce(Return(listing));
+  }
+
+  void expectCredentialListingSecure(const absl::optional<std::string>& listing) {
+    Http::TestRequestHeaderMapImpl headers{{":path", "/latest/meta-data/iam/security-credentials"},
+                                           {":authority", "169.254.169.254:80"},
+                                           {":method", "GET"},
+                                           {"X-aws-ec2-metadata-token", "TOKEN"}};
+    EXPECT_CALL(fetch_metadata_, fetch(messageMatches(headers))).WillOnce(Return(listing));
   }
 
   void expectDocument(const absl::optional<std::string>& document) {
-    EXPECT_CALL(fetcher_,
-                fetch("169.254.169.254:80", "/latest/meta-data/iam/security-credentials/doc1", _))
-        .WillOnce(Return(document));
+    Http::TestRequestHeaderMapImpl headers{
+        {":path", "/latest/meta-data/iam/security-credentials/doc1"},
+        {":authority", "169.254.169.254:80"},
+        {":method", "GET"}};
+    EXPECT_CALL(fetch_metadata_, fetch(messageMatches(headers))).WillOnce(Return(document));
+  }
+
+  void expectDocumentSecure(const absl::optional<std::string>& document) {
+    Http::TestRequestHeaderMapImpl headers{
+        {":path", "/latest/meta-data/iam/security-credentials/doc1"},
+        {":authority", "169.254.169.254:80"},
+        {":method", "GET"},
+        {"X-aws-ec2-metadata-token", "TOKEN"}};
+    EXPECT_CALL(fetch_metadata_, fetch(messageMatches(headers))).WillOnce(Return(document));
   }
 
   Event::SimulatedTimeSystem time_system_;
   Api::ApiPtr api_;
-  NiceMock<MockMetadataFetcher> fetcher_;
+  NiceMock<MockFetchMetadata> fetch_metadata_;
   InstanceProfileCredentialsProvider provider_;
 };
 
-TEST_F(InstanceProfileCredentialsProviderTest, FailedCredentailListing) {
+TEST_F(InstanceProfileCredentialsProviderTest, FailedCredentialListing) {
+  expectSessionToken(absl::optional<std::string>());
   expectCredentialListing(absl::optional<std::string>());
   const auto credentials = provider_.getCredentials();
   EXPECT_FALSE(credentials.accessKeyId().has_value());
@@ -98,7 +159,17 @@ TEST_F(InstanceProfileCredentialsProviderTest, FailedCredentailListing) {
   EXPECT_FALSE(credentials.sessionToken().has_value());
 }
 
+TEST_F(InstanceProfileCredentialsProviderTest, FailedCredentialListingSecure) {
+  expectSessionToken("TOKEN");
+  expectCredentialListingSecure(absl::optional<std::string>());
+  const auto credentials = provider_.getCredentials();
+  EXPECT_FALSE(credentials.accessKeyId().has_value());
+  EXPECT_FALSE(credentials.secretAccessKey().has_value());
+  EXPECT_FALSE(credentials.sessionToken().has_value());
+}
+
 TEST_F(InstanceProfileCredentialsProviderTest, EmptyCredentialListing) {
+  expectSessionToken(absl::optional<std::string>());
   expectCredentialListing("");
   const auto credentials = provider_.getCredentials();
   EXPECT_FALSE(credentials.accessKeyId().has_value());
@@ -106,7 +177,17 @@ TEST_F(InstanceProfileCredentialsProviderTest, EmptyCredentialListing) {
   EXPECT_FALSE(credentials.sessionToken().has_value());
 }
 
+TEST_F(InstanceProfileCredentialsProviderTest, EmptyCredentialListingSecure) {
+  expectSessionToken("TOKEN");
+  expectCredentialListingSecure("");
+  const auto credentials = provider_.getCredentials();
+  EXPECT_FALSE(credentials.accessKeyId().has_value());
+  EXPECT_FALSE(credentials.secretAccessKey().has_value());
+  EXPECT_FALSE(credentials.sessionToken().has_value());
+}
+
 TEST_F(InstanceProfileCredentialsProviderTest, MissingDocument) {
+  expectSessionToken(absl::optional<std::string>());
   expectCredentialListing("doc1\ndoc2\ndoc3");
   expectDocument(absl::optional<std::string>());
   const auto credentials = provider_.getCredentials();
@@ -115,7 +196,18 @@ TEST_F(InstanceProfileCredentialsProviderTest, MissingDocument) {
   EXPECT_FALSE(credentials.sessionToken().has_value());
 }
 
+TEST_F(InstanceProfileCredentialsProviderTest, MissingDocumentSecure) {
+  expectSessionToken("TOKEN");
+  expectCredentialListingSecure("doc1\ndoc2\ndoc3");
+  expectDocumentSecure(absl::optional<std::string>());
+  const auto credentials = provider_.getCredentials();
+  EXPECT_FALSE(credentials.accessKeyId().has_value());
+  EXPECT_FALSE(credentials.secretAccessKey().has_value());
+  EXPECT_FALSE(credentials.sessionToken().has_value());
+}
+
 TEST_F(InstanceProfileCredentialsProviderTest, MalformedDocumenet) {
+  expectSessionToken(absl::optional<std::string>());
   expectCredentialListing("doc1");
   expectDocument(R"EOF(
 not json
@@ -126,7 +218,20 @@ not json
   EXPECT_FALSE(credentials.sessionToken().has_value());
 }
 
+TEST_F(InstanceProfileCredentialsProviderTest, MalformedDocumentSecure) {
+  expectSessionToken("TOKEN");
+  expectCredentialListingSecure("doc1");
+  expectDocumentSecure(R"EOF(
+not json
+)EOF");
+  const auto credentials = provider_.getCredentials();
+  EXPECT_FALSE(credentials.accessKeyId().has_value());
+  EXPECT_FALSE(credentials.secretAccessKey().has_value());
+  EXPECT_FALSE(credentials.sessionToken().has_value());
+}
+
 TEST_F(InstanceProfileCredentialsProviderTest, EmptyValues) {
+  expectSessionToken(absl::optional<std::string>());
   expectCredentialListing("doc1");
   expectDocument(R"EOF(
 {
@@ -141,7 +246,24 @@ TEST_F(InstanceProfileCredentialsProviderTest, EmptyValues) {
   EXPECT_FALSE(credentials.sessionToken().has_value());
 }
 
+TEST_F(InstanceProfileCredentialsProviderTest, EmptyValuesSecure) {
+  expectSessionToken("TOKEN");
+  expectCredentialListingSecure("doc1");
+  expectDocumentSecure(R"EOF(
+{
+  "AccessKeyId": "",
+  "SecretAccessKey": "",
+  "Token": ""
+}
+)EOF");
+  const auto credentials = provider_.getCredentials();
+  EXPECT_FALSE(credentials.accessKeyId().has_value());
+  EXPECT_FALSE(credentials.secretAccessKey().has_value());
+  EXPECT_FALSE(credentials.sessionToken().has_value());
+}
+
 TEST_F(InstanceProfileCredentialsProviderTest, FullCachedCredentials) {
+  expectSessionToken(absl::optional<std::string>());
   expectCredentialListing("doc1");
   expectDocument(R"EOF(
 {
@@ -160,8 +282,29 @@ TEST_F(InstanceProfileCredentialsProviderTest, FullCachedCredentials) {
   EXPECT_EQ("token", cached_credentials.sessionToken().value());
 }
 
+TEST_F(InstanceProfileCredentialsProviderTest, FullCachedCredentialsSecure) {
+  expectSessionToken("TOKEN");
+  expectCredentialListingSecure("doc1");
+  expectDocumentSecure(R"EOF(
+{
+  "AccessKeyId": "akid",
+  "SecretAccessKey": "secret",
+  "Token": "token"
+}
+)EOF");
+  const auto credentials = provider_.getCredentials();
+  EXPECT_EQ("akid", credentials.accessKeyId().value());
+  EXPECT_EQ("secret", credentials.secretAccessKey().value());
+  EXPECT_EQ("token", credentials.sessionToken().value());
+  const auto cached_credentials = provider_.getCredentials();
+  EXPECT_EQ("akid", cached_credentials.accessKeyId().value());
+  EXPECT_EQ("secret", cached_credentials.secretAccessKey().value());
+  EXPECT_EQ("token", cached_credentials.sessionToken().value());
+}
+
 TEST_F(InstanceProfileCredentialsProviderTest, CredentialExpiration) {
   InSequence sequence;
+  expectSessionToken(absl::optional<std::string>());
   expectCredentialListing("doc1");
   expectDocument(R"EOF(
 {
@@ -175,8 +318,40 @@ TEST_F(InstanceProfileCredentialsProviderTest, CredentialExpiration) {
   EXPECT_EQ("secret", credentials.secretAccessKey().value());
   EXPECT_EQ("token", credentials.sessionToken().value());
   time_system_.advanceTimeWait(std::chrono::hours(2));
+  expectSessionToken(absl::optional<std::string>());
   expectCredentialListing("doc1");
   expectDocument(R"EOF(
+{
+  "AccessKeyId": "new_akid",
+  "SecretAccessKey": "new_secret",
+  "Token": "new_token"
+}
+)EOF");
+  const auto new_credentials = provider_.getCredentials();
+  EXPECT_EQ("new_akid", new_credentials.accessKeyId().value());
+  EXPECT_EQ("new_secret", new_credentials.secretAccessKey().value());
+  EXPECT_EQ("new_token", new_credentials.sessionToken().value());
+}
+
+TEST_F(InstanceProfileCredentialsProviderTest, CredentialExpirationSecure) {
+  InSequence sequence;
+  expectSessionToken("TOKEN");
+  expectCredentialListingSecure("doc1");
+  expectDocumentSecure(R"EOF(
+{
+  "AccessKeyId": "akid",
+  "SecretAccessKey": "secret",
+  "Token": "token"
+}
+)EOF");
+  const auto credentials = provider_.getCredentials();
+  EXPECT_EQ("akid", credentials.accessKeyId().value());
+  EXPECT_EQ("secret", credentials.secretAccessKey().value());
+  EXPECT_EQ("token", credentials.sessionToken().value());
+  time_system_.advanceTimeWait(std::chrono::hours(2));
+  expectSessionToken("TOKEN");
+  expectCredentialListingSecure("doc1");
+  expectDocumentSecure(R"EOF(
 {
   "AccessKeyId": "new_akid",
   "SecretAccessKey": "new_secret",
@@ -195,9 +370,8 @@ public:
       : api_(Api::createApiForTest(time_system_)),
         provider_(
             *api_,
-            [this](const std::string& host, const std::string& path,
-                   const absl::optional<std::string>& auth_token) -> absl::optional<std::string> {
-              return this->fetcher_.fetch(host, path, auth_token);
+            [this](Http::RequestMessage& message) -> absl::optional<std::string> {
+              return this->fetch_metadata_.fetch(message);
             },
             "169.254.170.2:80/path/to/doc", "auth_token") {
     // Tue Jan  2 03:04:05 UTC 2018
@@ -205,12 +379,16 @@ public:
   }
 
   void expectDocument(const absl::optional<std::string>& document) {
-    EXPECT_CALL(fetcher_, fetch("169.254.170.2:80", "/path/to/doc", _)).WillOnce(Return(document));
+    Http::TestRequestHeaderMapImpl headers{{":path", "/path/to/doc"},
+                                           {":authority", "169.254.170.2:80"},
+                                           {":method", "GET"},
+                                           {"authorization", "auth_token"}};
+    EXPECT_CALL(fetch_metadata_, fetch(messageMatches(headers))).WillOnce(Return(document));
   }
 
   Event::SimulatedTimeSystem time_system_;
   Api::ApiPtr api_;
-  NiceMock<MockMetadataFetcher> fetcher_;
+  NiceMock<MockFetchMetadata> fetch_metadata_;
   TaskRoleCredentialsProvider provider_;
 };
 

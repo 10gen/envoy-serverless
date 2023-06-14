@@ -1,6 +1,6 @@
 load(
     "//bazel:envoy_build_system.bzl",
-    "envoy_cc_library",
+    "envoy_cc_test_library",
     "envoy_package",
 )
 load("//bazel/wasm:wasm.bzl", "envoy_wasm_cc_binary", "wasm_rust_binary")
@@ -45,7 +45,7 @@ wasm_rust_binary(
     ],
 )
 
-envoy_cc_library(
+envoy_cc_test_library(
     name = "test_cpp_plugin",
     srcs = [
         "test_close_stream_cpp.cc",
@@ -70,8 +70,5 @@ envoy_wasm_cc_binary(
         "test_cpp.cc",
         "test_panic_cpp.cc",
         "test_resume_call_cpp.cc",
-    ],
-    deps = [
-        "@proxy_wasm_cpp_sdk//:proxy_wasm_intrinsics_lite",
     ],
 )

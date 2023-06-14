@@ -131,7 +131,8 @@ public:
   const std::string v2_empty_fault_config_yaml = "{}";
 
   void setUpTest(const envoy::extensions::filters::http::fault::v3::HTTPFault fault) {
-    config_ = std::make_shared<FaultFilterConfig>(fault, runtime_, "prefix.", stats_, time_system_);
+    config_ = std::make_shared<FaultFilterConfig>(fault, runtime_, "prefix.", *stats_.rootScope(),
+                                                  time_system_);
     filter_ = std::make_unique<FaultFilter>(config_);
     filter_->setDecoderFilterCallbacks(decoder_filter_callbacks_);
     filter_->setEncoderFilterCallbacks(encoder_filter_callbacks_);
@@ -1193,8 +1194,7 @@ TEST_F(FaultFilterTest, RouteFaultOverridesListenerFault) {
   setUpTest(v2_empty_fault_config_yaml);
   Fault::FaultSettings delay_fault(convertYamlStrToProtoConfig(delay_with_upstream_cluster_yaml));
 
-  ON_CALL(*decoder_filter_callbacks_.route_,
-          mostSpecificPerFilterConfig("envoy.filters.http.fault"))
+  ON_CALL(*decoder_filter_callbacks_.route_, mostSpecificPerFilterConfig(_))
       .WillByDefault(Return(&delay_fault));
 
   const std::string upstream_cluster("www1");
@@ -1368,7 +1368,7 @@ TEST_F(FaultFilterRateLimitTest, ResponseRateLimitEnabled) {
   EXPECT_EQ(1UL, config_->stats().response_rl_injected_.value());
   EXPECT_EQ(1UL, config_->stats().active_faults_.value());
 
-  EXPECT_EQ(Http::FilterHeadersStatus::Continue, filter_->encode1xxHeaders(response_headers_));
+  EXPECT_EQ(Http::Filter1xxHeadersStatus::Continue, filter_->encode1xxHeaders(response_headers_));
   Http::MetadataMap metadata_map;
   EXPECT_EQ(Http::FilterMetadataStatus::Continue, filter_->encodeMetadata(metadata_map));
   EXPECT_EQ(Http::FilterHeadersStatus::Continue, filter_->encodeHeaders(response_headers_, false));

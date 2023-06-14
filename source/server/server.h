@@ -39,10 +39,12 @@
 #include "source/common/runtime/runtime_impl.h"
 #include "source/common/secret/secret_manager_impl.h"
 #include "source/common/upstream/health_discovery_service.h"
+
+#ifdef ENVOY_ADMIN_FUNCTIONALITY
 #include "source/server/admin/admin.h"
+#endif
 #include "source/server/configuration_impl.h"
 #include "source/server/listener_hooks.h"
-#include "source/server/listener_manager_impl.h"
 #include "source/server/overload_manager_impl.h"
 #include "source/server/worker_impl.h"
 
@@ -187,7 +189,7 @@ public:
   Stats::Scope& serverScope() override { return *server_scope_; }
   Singleton::Manager& singletonManager() override { return server_.singletonManager(); }
   ThreadLocal::Instance& threadLocal() override { return server_.threadLocal(); }
-  Admin& admin() override { return server_.admin(); }
+  OptRef<Admin> admin() override { return server_.admin(); }
   TimeSource& timeSource() override { return api().timeSource(); }
   Api::Api& api() override { return server_.api(); }
   Grpc::Context& grpcContext() override { return server_.grpcContext(); }
@@ -216,7 +218,7 @@ public:
 
 private:
   Instance& server_;
-  Stats::ScopePtr server_scope_;
+  Stats::ScopeSharedPtr server_scope_;
 };
 
 /**
@@ -243,9 +245,10 @@ public:
   void run();
 
   // Server::Instance
-  Admin& admin() override { return *admin_; }
+  OptRef<Admin> admin() override { return makeOptRefFromPtr(admin_.get()); }
   Api::Api& api() override { return *api_; }
   Upstream::ClusterManager& clusterManager() override;
+  const Upstream::ClusterManager& clusterManager() const override;
   Ssl::ContextManager& sslContextManager() override { return *ssl_context_manager_; }
   Event::Dispatcher& dispatcher() override { return *dispatcher_; }
   Network::DnsResolverSharedPtr dnsResolver() override { return dns_resolver_; }
@@ -304,7 +307,7 @@ public:
   registerCallback(Stage stage, StageCallbackWithCompletion callback) override;
 
 private:
-  enum class ReusePortDefault { True, False, Runtime };
+  Network::DnsResolverSharedPtr getOrCreateDnsResolver();
 
   ProtobufTypes::MessagePtr dumpBootstrapConfig();
   void flushStatsInternal();
@@ -315,7 +318,7 @@ private:
   void startWorkers();
   void terminate();
   void notifyCallbacksForStage(
-      Stage stage, Event::PostCb completion_cb = [] {});
+      Stage stage, std::function<void()> completion_cb = [] {});
   void onRuntimeReady();
   void onClusterManagerPrimaryInitializationComplete();
 
@@ -354,13 +357,16 @@ private:
   Random::RandomGeneratorPtr random_generator_;
   envoy::config::bootstrap::v3::Bootstrap bootstrap_;
   Api::ApiPtr api_;
+  // ssl_context_manager_ must come before dispatcher_, since ClusterInfo
+  // references SslSocketFactory and is deleted on the main thread via the dispatcher.
+  std::unique_ptr<Ssl::ContextManager> ssl_context_manager_;
   Event::DispatcherPtr dispatcher_;
-  std::unique_ptr<AdminImpl> admin_;
+  AccessLog::AccessLogManagerImpl access_log_manager_;
+  std::unique_ptr<Admin> admin_;
   Singleton::ManagerPtr singleton_manager_;
   Network::ConnectionHandlerPtr handler_;
   std::unique_ptr<Runtime::ScopedLoaderSingleton> runtime_singleton_;
-  std::unique_ptr<Ssl::ContextManager> ssl_context_manager_;
-  ProdListenerComponentFactory listener_component_factory_;
+  std::unique_ptr<Runtime::Loader> runtime_;
   ProdWorkerFactory worker_factory_;
   std::unique_ptr<ListenerManager> listener_manager_;
   absl::node_hash_map<Stage, LifecycleNotifierCallbacks> stage_callbacks_;
@@ -369,7 +375,6 @@ private:
   Network::DnsResolverSharedPtr dns_resolver_;
   Event::TimerPtr stat_flush_timer_;
   DrainManagerPtr drain_manager_;
-  AccessLog::AccessLogManagerImpl access_log_manager_;
   std::unique_ptr<Upstream::ClusterManagerFactory> cluster_manager_factory_;
   std::unique_ptr<Server::GuardDog> main_thread_guard_dog_;
   std::unique_ptr<Server::GuardDog> worker_guard_dog_;
@@ -394,7 +399,8 @@ private:
   ListenerHooks& hooks_;
   Quic::QuicStatNames quic_stat_names_;
   ServerFactoryContextImpl server_contexts_;
-  absl::optional<ReusePortDefault> enable_reuse_port_default_;
+  bool enable_reuse_port_default_;
+  Regex::EnginePtr regex_engine_;
 
   bool stats_flush_in_progress_ : 1;
 

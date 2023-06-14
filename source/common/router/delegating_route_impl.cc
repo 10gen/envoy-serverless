@@ -50,6 +50,12 @@ void DelegatingRouteEntry::finalizeRequestHeaders(Http::RequestHeaderMap& header
                                                            insert_envoy_original_path);
 }
 
+Http::HeaderTransforms
+DelegatingRouteEntry::requestHeaderTransforms(const StreamInfo::StreamInfo& stream_info,
+                                              bool do_formatting) const {
+  return base_route_->routeEntry()->requestHeaderTransforms(stream_info, do_formatting);
+}
+
 const Http::HashPolicy* DelegatingRouteEntry::hashPolicy() const {
   return base_route_->routeEntry()->hashPolicy();
 }
@@ -68,6 +74,14 @@ const RateLimitPolicy& DelegatingRouteEntry::rateLimitPolicy() const {
 
 const RetryPolicy& DelegatingRouteEntry::retryPolicy() const {
   return base_route_->routeEntry()->retryPolicy();
+}
+
+const PathMatcherSharedPtr& DelegatingRouteEntry::pathMatcher() const {
+  return base_route_->routeEntry()->pathMatcher();
+}
+
+const PathRewriterSharedPtr& DelegatingRouteEntry::pathRewriter() const {
+  return base_route_->routeEntry()->pathRewriter();
 }
 
 const InternalRedirectPolicy& DelegatingRouteEntry::internalRedirectPolicy() const {
@@ -162,12 +176,17 @@ const UpgradeMap& DelegatingRouteEntry::upgradeMap() const {
 }
 
 using ConnectConfig = envoy::config::route::v3::RouteAction::UpgradeConfig::ConnectConfig;
-const absl::optional<ConnectConfig>& DelegatingRouteEntry::connectConfig() const {
+using ConnectConfigOptRef = OptRef<ConnectConfig>;
+const ConnectConfigOptRef DelegatingRouteEntry::connectConfig() const {
   return base_route_->routeEntry()->connectConfig();
 }
 
 const std::string& DelegatingRouteEntry::routeName() const {
   return base_route_->routeEntry()->routeName();
+}
+
+const EarlyDataPolicy& DelegatingRouteEntry::earlyDataPolicy() const {
+  return base_route_->routeEntry()->earlyDataPolicy();
 }
 
 } // namespace Router

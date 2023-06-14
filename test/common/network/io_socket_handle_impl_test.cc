@@ -14,7 +14,6 @@
 #include "gtest/gtest.h"
 
 using testing::_;
-using testing::DoAll;
 using testing::Eq;
 using testing::Invoke;
 using testing::NiceMock;
@@ -155,8 +154,7 @@ TEST(IoSocketHandleImpl, NullptrIfaddrs) {
 
 class IoSocketHandleImplTest : public testing::TestWithParam<Network::Address::IpVersion> {};
 INSTANTIATE_TEST_SUITE_P(IpVersions, IoSocketHandleImplTest,
-                         testing::ValuesIn({Network::Address::IpVersion::v4,
-                                            Network::Address::IpVersion::v6}),
+                         testing::ValuesIn(TestEnvironment::getIpVersionsForTest()),
                          TestUtility::ipTestParamsToString);
 
 TEST_P(IoSocketHandleImplTest, InterfaceNameForLoopback) {

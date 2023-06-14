@@ -39,7 +39,7 @@ void Utility::responseFlagsToAccessLogResponseFlags(
     envoy::data::accesslog::v3::AccessLogCommon& common_access_log,
     const StreamInfo::StreamInfo& stream_info) {
 
-  static_assert(StreamInfo::ResponseFlag::LastFlag == 0x2000000,
+  static_assert(StreamInfo::ResponseFlag::LastFlag == 0x4000000,
                 "A flag has been added. Fix this code.");
 
   if (stream_info.hasResponseFlag(StreamInfo::ResponseFlag::FailedLocalHealthCheck)) {
@@ -146,6 +146,10 @@ void Utility::responseFlagsToAccessLogResponseFlags(
   if (stream_info.hasResponseFlag(StreamInfo::ResponseFlag::OverloadManager)) {
     common_access_log.mutable_response_flags()->set_overload_manager(true);
   }
+
+  if (stream_info.hasResponseFlag(StreamInfo::ResponseFlag::DnsResolutionFailed)) {
+    common_access_log.mutable_response_flags()->set_dns_resolution_failure(true);
+  }
 }
 
 void Utility::extractCommonAccessLogProperties(
@@ -168,29 +172,37 @@ void Utility::extractCommonAccessLogProperties(
         *stream_info.downstreamAddressProvider().localAddress(),
         *common_access_log.mutable_downstream_local_address());
   }
+  if (!stream_info.downstreamAddressProvider().requestedServerName().empty()) {
+    common_access_log.mutable_tls_properties()->set_tls_sni_hostname(
+        MessageUtil::sanitizeUtf8String(
+            stream_info.downstreamAddressProvider().requestedServerName()));
+  }
+  if (!stream_info.downstreamAddressProvider().ja3Hash().empty()) {
+    common_access_log.mutable_tls_properties()->set_ja3_fingerprint(
+        std::string(stream_info.downstreamAddressProvider().ja3Hash()));
+  }
   if (stream_info.downstreamAddressProvider().sslConnection() != nullptr) {
     auto* tls_properties = common_access_log.mutable_tls_properties();
     const Ssl::ConnectionInfoConstSharedPtr downstream_ssl_connection =
         stream_info.downstreamAddressProvider().sslConnection();
 
-    tls_properties->set_tls_sni_hostname(
-        std::string(stream_info.downstreamAddressProvider().requestedServerName()));
-
     auto* local_properties = tls_properties->mutable_local_certificate_properties();
     for (const auto& uri_san : downstream_ssl_connection->uriSanLocalCertificate()) {
       auto* local_san = local_properties->add_subject_alt_name();
-      local_san->set_uri(uri_san);
+      local_san->set_uri(MessageUtil::sanitizeUtf8String(uri_san));
     }
-    local_properties->set_subject(downstream_ssl_connection->subjectLocalCertificate());
+    local_properties->set_subject(
+        MessageUtil::sanitizeUtf8String(downstream_ssl_connection->subjectLocalCertificate()));
 
     auto* peer_properties = tls_properties->mutable_peer_certificate_properties();
     for (const auto& uri_san : downstream_ssl_connection->uriSanPeerCertificate()) {
       auto* peer_san = peer_properties->add_subject_alt_name();
-      peer_san->set_uri(uri_san);
+      peer_san->set_uri(MessageUtil::sanitizeUtf8String(uri_san));
     }
 
     peer_properties->set_subject(downstream_ssl_connection->subjectPeerCertificate());
-    tls_properties->set_tls_session_id(downstream_ssl_connection->sessionId());
+    tls_properties->set_tls_session_id(
+        MessageUtil::sanitizeUtf8String(downstream_ssl_connection->sessionId()));
     tls_properties->set_tls_version(
         tlsVersionStringToEnum(downstream_ssl_connection->tlsVersion()));
 
@@ -203,8 +215,14 @@ void Utility::extractCommonAccessLogProperties(
               stream_info.startTime().time_since_epoch())
               .count()));
 
+  absl::optional<std::chrono::nanoseconds> dur = stream_info.requestComplete();
+  if (dur) {
+    common_access_log.mutable_duration()->MergeFrom(
+        Protobuf::util::TimeUtil::NanosecondsToDuration(dur.value().count()));
+  }
+
   StreamInfo::TimingUtility timing(stream_info);
-  absl::optional<std::chrono::nanoseconds> dur = timing.lastDownstreamRxByteReceived();
+  dur = timing.lastDownstreamRxByteReceived();
   if (dur) {
     common_access_log.mutable_time_to_last_rx_byte()->MergeFrom(
         Protobuf::util::TimeUtil::NanosecondsToDuration(dur.value().count()));
@@ -267,6 +285,13 @@ void Utility::extractCommonAccessLogProperties(
   if (!stream_info.getRouteName().empty()) {
     common_access_log.set_route_name(stream_info.getRouteName());
   }
+  if (stream_info.attemptCount().has_value()) {
+    common_access_log.set_upstream_request_attempt_count(stream_info.attemptCount().value());
+  }
+  if (stream_info.connectionTerminationDetails().has_value()) {
+    common_access_log.set_connection_termination_details(
+        stream_info.connectionTerminationDetails().value());
+  }
 
   responseFlagsToAccessLogResponseFlags(common_access_log, stream_info);
   if (stream_info.dynamicMetadata().filter_metadata_size() > 0) {
@@ -274,10 +299,8 @@ void Utility::extractCommonAccessLogProperties(
   }
 
   for (const auto& key : config.filter_state_objects_to_log()) {
-    if (stream_info.filterState().hasDataWithName(key)) {
-      const auto& obj =
-          stream_info.filterState().getDataReadOnly<StreamInfo::FilterState::Object>(key);
-      ProtobufTypes::MessagePtr serialized_proto = obj.serializeAsProto();
+    if (auto state = stream_info.filterState().getDataReadOnlyGeneric(key); state != nullptr) {
+      ProtobufTypes::MessagePtr serialized_proto = state->serializeAsProto();
       if (serialized_proto != nullptr) {
         auto& filter_state_objects = *common_access_log.mutable_filter_state_objects();
         ProtobufWkt::Any& any = filter_state_objects[key];
@@ -294,6 +317,25 @@ void Utility::extractCommonAccessLogProperties(
   for (const auto& custom_tag : config.custom_tags()) {
     const auto tag_applier = Tracing::CustomTagUtility::createCustomTag(custom_tag);
     tag_applier->applyLog(common_access_log, ctx);
+  }
+
+  // If the stream is not complete, then this log entry is intermediate log entry.
+  if (!stream_info.requestComplete().has_value()) {
+    common_access_log.set_intermediate_log_entry(true);
+  }
+
+  // Set stream unique id from the stream info.
+  if (auto provider = stream_info.getStreamIdProvider(); provider.has_value()) {
+    common_access_log.set_stream_id(std::string(provider->toStringView().value_or("")));
+  }
+
+  if (const auto& bytes_meter = stream_info.getDownstreamBytesMeter(); bytes_meter != nullptr) {
+    common_access_log.set_downstream_wire_bytes_sent(bytes_meter->wireBytesSent());
+    common_access_log.set_downstream_wire_bytes_received(bytes_meter->wireBytesReceived());
+  }
+  if (const auto& bytes_meter = stream_info.getUpstreamBytesMeter(); bytes_meter != nullptr) {
+    common_access_log.set_upstream_wire_bytes_sent(bytes_meter->wireBytesSent());
+    common_access_log.set_upstream_wire_bytes_received(bytes_meter->wireBytesReceived());
   }
 }
 

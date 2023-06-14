@@ -9,6 +9,7 @@
 
 #include "test/mocks/access_log/mocks.h"
 #include "test/mocks/event/mocks.h"
+#include "test/mocks/http/header_validator.h"
 #include "test/mocks/http/mocks.h"
 #include "test/mocks/local_info/mocks.h"
 #include "test/mocks/network/mocks.h"
@@ -27,23 +28,13 @@ using testing::NiceMock;
 namespace Envoy {
 namespace Http {
 
-class HttpConnectionManagerImplTest : public testing::Test, public ConnectionManagerConfig {
+// Base class for HttpConnectionManagerImpl related tests. This base class is used by tests under
+// common/http as well as test/extensions/filters/http/ext_proc/, to reuse the many mocks/default
+// impls of ConnectionManagerConfig that we need to provide to HttpConnectionManagerImpl.
+class HttpConnectionManagerImplMixin : public ConnectionManagerConfig {
 public:
-  struct RouteConfigProvider : public Router::RouteConfigProvider {
-    RouteConfigProvider(TimeSource& time_source) : time_source_(time_source) {}
-
-    // Router::RouteConfigProvider
-    Router::ConfigConstSharedPtr config() override { return route_config_; }
-    absl::optional<ConfigInfo> configInfo() const override { return {}; }
-    SystemTime lastUpdated() const override { return time_source_.systemTime(); }
-    void onConfigUpdate() override {}
-
-    TimeSource& time_source_;
-    std::shared_ptr<Router::MockConfig> route_config_{new NiceMock<Router::MockConfig>()};
-  };
-
-  HttpConnectionManagerImplTest();
-  ~HttpConnectionManagerImplTest() override;
+  HttpConnectionManagerImplMixin();
+  ~HttpConnectionManagerImplMixin() override;
   Tracing::CustomTagConstSharedPtr requestHeaderCustomTag(const std::string& header);
   void setup(bool ssl, const std::string& server_name, bool tracing = true, bool use_srds = false);
   void setupFilterChain(int num_decoder_filters, int num_encoder_filters, int num_requests = 1);
@@ -59,7 +50,10 @@ public:
 
   Event::MockTimer* setUpTimer();
   void sendRequestHeadersAndData();
-  ResponseHeaderMap* sendResponseHeaders(ResponseHeaderMapPtr&& response_headers);
+  ResponseHeaderMap*
+  sendResponseHeaders(ResponseHeaderMapPtr&& response_headers,
+                      absl::optional<StreamInfo::ResponseFlag> response_flag = absl::nullopt,
+                      std::string response_code_details = "details");
   void expectOnDestroy(bool deferred = true);
   void doRemoteClose(bool deferred = true);
   void testPathNormalization(const RequestHeaderMap& request_headers,
@@ -67,6 +61,10 @@ public:
 
   // Http::ConnectionManagerConfig
   const std::list<AccessLog::InstanceSharedPtr>& accessLogs() override { return access_logs_; }
+  bool flushAccessLogOnNewRequest() override { return flush_access_log_on_new_request_; }
+  const absl::optional<std::chrono::milliseconds>& accessLogFlushInterval() override {
+    return access_log_flush_interval_;
+  }
   ServerConnectionPtr createCodec(Network::Connection&, const Buffer::Instance&,
                                   ServerConnectionCallbacks&) override {
     return ServerConnectionPtr{codec_};
@@ -154,7 +152,41 @@ public:
   originalIpDetectionExtensions() const override {
     return ip_detection_extensions_;
   }
+  const std::vector<Http::EarlyHeaderMutationPtr>& earlyHeaderMutationExtensions() const override {
+    return early_header_mutations_;
+  }
   uint64_t maxRequestsPerConnection() const override { return max_requests_per_connection_; }
+  const HttpConnectionManagerProto::ProxyStatusConfig* proxyStatusConfig() const override {
+    return proxy_status_config_.get();
+  }
+  HeaderValidatorPtr makeHeaderValidator(Protocol protocol) override {
+    return header_validator_factory_.create(protocol, header_validator_stats_);
+  }
+  bool appendXForwardedPort() const override { return false; }
+  bool addProxyProtocolConnectionState() const override {
+    return add_proxy_protocol_connection_state_;
+  }
+
+  // Simple helper to wrapper filter to the factory function.
+  FilterFactoryCb createDecoderFilterFactoryCb(StreamDecoderFilterSharedPtr filter) {
+    return [filter](FilterChainFactoryCallbacks& callbacks) {
+      callbacks.addStreamDecoderFilter(filter);
+    };
+  }
+  FilterFactoryCb createEncoderFilterFactoryCb(StreamEncoderFilterSharedPtr filter) {
+    return [filter](FilterChainFactoryCallbacks& callbacks) {
+      callbacks.addStreamEncoderFilter(filter);
+    };
+  }
+  FilterFactoryCb createStreamFilterFactoryCb(StreamFilterSharedPtr filter) {
+    return [filter](FilterChainFactoryCallbacks& callbacks) { callbacks.addStreamFilter(filter); };
+  }
+  FilterFactoryCb createLogHandlerFactoryCb(AccessLog::InstanceSharedPtr handler) {
+    return [handler](FilterChainFactoryCallbacks& callbacks) {
+      callbacks.addAccessLogHandler(handler);
+    };
+  }
+  void expectUhvTrailerCheckFail();
 
   Envoy::Event::SimulatedTimeSystem test_time_;
   NiceMock<Router::MockRouteConfigProvider> route_config_provider_;
@@ -166,6 +198,8 @@ public:
   NiceMock<Envoy::AccessLog::MockAccessLogManager> log_manager_;
   std::string access_log_path_;
   std::list<AccessLog::InstanceSharedPtr> access_logs_;
+  bool flush_access_log_on_new_request_ = false;
+  absl::optional<std::chrono::milliseconds> access_log_flush_interval_;
   NiceMock<Network::MockReadFilterCallbacks> filter_callbacks_;
   MockServerConnection* codec_;
   NiceMock<MockFilterChainFactory> filter_factory_;
@@ -198,11 +232,10 @@ public:
   NiceMock<Server::Configuration::MockFactoryContext> factory_context_;
   RequestDecoder* decoder_{};
   std::shared_ptr<Ssl::MockConnectionInfo> ssl_connection_;
-  std::shared_ptr<NiceMock<Tracing::MockHttpTracer>> tracer_{
-      std::make_shared<NiceMock<Tracing::MockHttpTracer>>()};
+  std::shared_ptr<NiceMock<Tracing::MockTracer>> tracer_{
+      std::make_shared<NiceMock<Tracing::MockTracer>>()};
   TracingConnectionManagerConfigPtr tracing_config_;
   SlowDateProviderImpl date_provider_{test_time_.timeSystem()};
-  NiceMock<MockStream> stream_;
   Http::StreamCallbacks* stream_callbacks_{nullptr};
   NiceMock<Upstream::MockClusterManager> cluster_manager_;
   NiceMock<Server::MockOverloadManager> overload_manager_;
@@ -223,10 +256,11 @@ public:
   NiceMock<Tcp::ConnectionPool::MockInstance> conn_pool_; // for websocket tests
   RequestIDExtensionSharedPtr request_id_extension_;
   std::vector<Http::OriginalIPDetectionSharedPtr> ip_detection_extensions_{};
+  std::vector<Http::EarlyHeaderMutationPtr> early_header_mutations_{};
+  bool add_proxy_protocol_connection_state_ = true;
 
   const LocalReply::LocalReplyPtr local_reply_;
 
-  // TODO(mattklein123): Not all tests have been converted over to better setup. Convert the rest.
   NiceMock<MockResponseEncoder> response_encoder_;
   std::vector<MockStreamDecoderFilter*> decoder_filters_;
   std::vector<MockStreamEncoderFilter*> encoder_filters_;
@@ -236,7 +270,12 @@ public:
           envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager::
               KEEP_UNCHANGED};
   bool strip_trailing_host_dot_ = false;
+  std::unique_ptr<HttpConnectionManagerProto::ProxyStatusConfig> proxy_status_config_;
+  NiceMock<MockHeaderValidatorFactory> header_validator_factory_;
+  NiceMock<MockHeaderValidatorStats> header_validator_stats_;
 };
 
+class HttpConnectionManagerImplTest : public HttpConnectionManagerImplMixin,
+                                      public testing::Test {};
 } // namespace Http
 } // namespace Envoy

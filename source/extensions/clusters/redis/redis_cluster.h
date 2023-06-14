@@ -90,13 +90,13 @@ namespace Redis {
 
 class RedisCluster : public Upstream::BaseDynamicClusterImpl {
 public:
-  RedisCluster(const envoy::config::cluster::v3::Cluster& cluster,
+  RedisCluster(Server::Configuration::ServerFactoryContext& server_context,
+               const envoy::config::cluster::v3::Cluster& cluster,
                const envoy::extensions::clusters::redis::v3::RedisClusterConfig& redis_cluster,
+               Upstream::ClusterFactoryContext& context,
                NetworkFilters::Common::Redis::Client::ClientFactory& client_factory,
                Upstream::ClusterManager& cluster_manager, Runtime::Loader& runtime, Api::Api& api,
-               Network::DnsResolverSharedPtr dns_resolver,
-               Server::Configuration::TransportSocketFactoryContextImpl& factory_context,
-               Stats::ScopePtr&& stats_scope, bool added_via_api,
+               Network::DnsResolverSharedPtr dns_resolver, bool added_via_api,
                ClusterSlotUpdateCallBackSharedPtr factory);
 
   struct ClusterSlotsRequest : public Extensions::NetworkFilters::Common::Redis::RespValue {
@@ -126,7 +126,7 @@ private:
   void updateAllHosts(const Upstream::HostVector& hosts_added,
                       const Upstream::HostVector& hosts_removed, uint32_t priority);
 
-  void onClusterSlotUpdate(ClusterSlotsPtr&&);
+  void onClusterSlotUpdate(ClusterSlotsSharedPtr&&);
 
   void reloadHealthyHostsHelper(const Upstream::HostSharedPtr& host) override;
 
@@ -222,7 +222,7 @@ private:
     uint32_t maxBufferSizeBeforeFlush() const override { return 0; }
     std::chrono::milliseconds bufferFlushTimeoutInMs() const override { return buffer_timeout_; }
     uint32_t maxUpstreamUnknownConnections() const override { return 0; }
-    bool enableCommandStats() const override { return false; }
+    bool enableCommandStats() const override { return true; }
     // For any readPolicy other than Primary, the RedisClientFactory will send a READONLY command
     // when establishing a new connection. Since we're only using this for making the "cluster
     // slots" commands, the READONLY command is not relevant in this context. We're setting it to
@@ -235,14 +235,19 @@ private:
     void onResponse(NetworkFilters::Common::Redis::RespValuePtr&& value) override;
     void onFailure() override;
     // Note: Below callback isn't used in topology updates
-    bool onRedirection(NetworkFilters::Common::Redis::RespValuePtr&&, const std::string&,
-                       bool) override {
-      return true;
-    }
+    void onRedirection(NetworkFilters::Common::Redis::RespValuePtr&&, const std::string&,
+                       bool) override {}
     void onUnexpectedResponse(const NetworkFilters::Common::Redis::RespValuePtr&);
 
     Network::Address::InstanceConstSharedPtr
-    ProcessCluster(const NetworkFilters::Common::Redis::RespValue& value);
+    ipAddressFromClusterEntry(const std::vector<NetworkFilters::Common::Redis::RespValue>& array);
+    bool validateCluster(const NetworkFilters::Common::Redis::RespValue& value);
+    void resolveClusterHostnames(ClusterSlotsSharedPtr&& slots,
+                                 std::shared_ptr<std::uint64_t> hostname_resolution_required_cnt);
+    void resolveReplicas(ClusterSlotsSharedPtr slots, std::size_t index,
+                         std::shared_ptr<std::uint64_t> hostname_resolution_required_cnt);
+    void finishClusterHostnameResolution(ClusterSlotsSharedPtr slots);
+    void updateDnsStats(Network::DnsResolver::ResolutionStatus status, bool empty_response);
 
     RedisCluster& parent_;
     Event::Dispatcher& dispatcher_;
@@ -294,11 +299,10 @@ private:
 
   std::pair<Upstream::ClusterImplBaseSharedPtr, Upstream::ThreadAwareLoadBalancerPtr>
   createClusterWithConfig(
+      Server::Configuration::ServerFactoryContext& server_context,
       const envoy::config::cluster::v3::Cluster& cluster,
       const envoy::extensions::clusters::redis::v3::RedisClusterConfig& proto_config,
-      Upstream::ClusterFactoryContext& context,
-      Server::Configuration::TransportSocketFactoryContextImpl& socket_factory_context,
-      Stats::ScopePtr&& stats_scope) override;
+      Upstream::ClusterFactoryContext& context) override;
 };
 } // namespace Redis
 } // namespace Clusters

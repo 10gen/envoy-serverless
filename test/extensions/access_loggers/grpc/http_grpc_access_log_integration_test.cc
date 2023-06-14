@@ -23,7 +23,12 @@ namespace {
 class AccessLogIntegrationTest : public Grpc::GrpcClientIntegrationParamTest,
                                  public HttpIntegrationTest {
 public:
-  AccessLogIntegrationTest() : HttpIntegrationTest(Http::CodecType::HTTP1, ipVersion()) {}
+  AccessLogIntegrationTest() : HttpIntegrationTest(Http::CodecType::HTTP1, ipVersion()) {
+    // TODO(ggreenway): add tag extraction rules.
+    // Missing stat tag-extraction rule for stat 'grpc.accesslog.streams_closed_11' and stat_prefix
+    // 'accesslog'.
+    skip_tag_extraction_rule_check_ = true;
+  }
 
   void createUpstreams() override {
     HttpIntegrationTest::createUpstreams();
@@ -85,10 +90,12 @@ public:
     log_entry->mutable_common_properties()->clear_downstream_direct_remote_address();
     log_entry->mutable_common_properties()->clear_downstream_local_address();
     log_entry->mutable_common_properties()->clear_start_time();
+    log_entry->mutable_common_properties()->clear_duration();
     log_entry->mutable_common_properties()->clear_time_to_last_rx_byte();
     log_entry->mutable_common_properties()->clear_time_to_first_downstream_tx_byte();
     log_entry->mutable_common_properties()->clear_time_to_last_downstream_tx_byte();
     log_entry->mutable_request()->clear_request_id();
+    log_entry->mutable_common_properties()->clear_stream_id();
     if (request_msg.has_identifier()) {
       auto* node = request_msg.mutable_identifier()->mutable_node();
       node->clear_extensions();
@@ -134,18 +141,22 @@ http_logs:
     common_properties:
       response_flags:
         no_route_found: true
+      downstream_wire_bytes_sent: 178
+      downstream_wire_bytes_received: 38
     protocol_version: HTTP11
     request:
       scheme: http
       authority: host
+      downstream_header_bytes_received: 11
       path: /notfound
       request_headers_bytes: 118
       request_method: GET
     response:
+      downstream_header_bytes_sent: 152
       response_code:
         value: 404
       response_code_details: "route_not_found"
-      response_headers_bytes: 54
+      response_headers_bytes: 131
 )EOF")));
 
   BufferingStreamDecoderPtr response = IntegrationUtil::makeSingleRequest(
@@ -158,18 +169,22 @@ http_logs:
     common_properties:
       response_flags:
         no_route_found: true
+      downstream_wire_bytes_sent: 178
+      downstream_wire_bytes_received: 38
     protocol_version: HTTP11
     request:
+      downstream_header_bytes_received: 11
       scheme: http
       authority: host
       path: /notfound
       request_headers_bytes: 118
       request_method: GET
     response:
+      downstream_header_bytes_sent: 152
       response_code:
         value: 404
       response_code_details: "route_not_found"
-      response_headers_bytes: 54
+      response_headers_bytes: 131
 )EOF"));
 
   // Send an empty response and end the stream. This should never happen but make sure nothing
@@ -207,18 +222,22 @@ http_logs:
     common_properties:
       response_flags:
         no_route_found: true
+      downstream_wire_bytes_sent: 178
+      downstream_wire_bytes_received: 38
     protocol_version: HTTP11
     request:
+      downstream_header_bytes_received: 11
       scheme: http
       authority: host
       path: /notfound
       request_headers_bytes: 118
       request_method: GET
     response:
+      downstream_header_bytes_sent: 152
       response_code:
         value: 404
       response_code_details: "route_not_found"
-      response_headers_bytes: 54
+      response_headers_bytes: 131
 )EOF")));
   cleanup();
 }
@@ -271,6 +290,12 @@ typed_config:
 // Verify the grpc cached logger is available after the initial logger filter is destroyed.
 // Regression test for https://github.com/envoyproxy/envoy/issues/18066
 TEST_P(AccessLogIntegrationTest, GrpcLoggerSurvivesAfterReloadConfig) {
+#ifdef ENVOY_ENABLE_UHV
+  // TODO(#23287) - Determine HTTP/0.9 and HTTP/1.0 support within UHV
+  return;
+#endif
+
+  config_helper_.disableDelayClose();
   autonomous_upstream_ = true;
   // The grpc access logger connection never closes. It's ok to see an incomplete logging stream.
   autonomous_allow_incomplete_streams_ = true;
@@ -301,23 +326,15 @@ TEST_P(AccessLogIntegrationTest, GrpcLoggerSurvivesAfterReloadConfig) {
 
   // HTTP 1.1 is allowed and the connection is kept open until the listener update.
   std::string response;
-  auto connection =
-      createConnectionDriver(lookupPort("http"), "GET / HTTP/1.1\r\nHost: host\r\n\r\n",
-                             [&response, &dispatcher = *dispatcher_](
-                                 Network::ClientConnection&, const Buffer::Instance& data) -> void {
-                               response.append(data.toString());
-                               if (response.find("\r\n\r\n") != std::string::npos) {
-                                 dispatcher.exit();
-                               }
-                             });
-  connection->run();
+  sendRawHttpAndWaitForResponse(lookupPort("http"), "GET / HTTP/1.1\r\nHost: host\r\n\r\n",
+                                &response, true);
   EXPECT_TRUE(response.find("HTTP/1.1 200") == 0);
 
   test_server_->waitForCounterEq("access_logs.grpc_access_log.logs_written", 2);
 
   // Create a new config with HTTP/1.0 proxying. The goal is to trigger a listener update.
   ConfigHelper new_config_helper(
-      version_, *api_, MessageUtil::getJsonStringFromMessageOrDie(config_helper_.bootstrap()));
+      version_, *api_, MessageUtil::getJsonStringFromMessageOrError(config_helper_.bootstrap()));
   new_config_helper.addConfigModifier(
       [&](envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager&
               hcm) {

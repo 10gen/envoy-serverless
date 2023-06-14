@@ -1,5 +1,6 @@
 load(
     "//bazel:envoy_build_system.bzl",
+    "envoy_cc_extension",
     "envoy_cc_library",
     "envoy_extension_package",
 )
@@ -14,8 +15,10 @@ envoy_cc_library(
         "wasm_runtime_factory.h",
     ],
     deps = [
+        "//envoy/config:typed_config_interface",
         "@proxy_wasm_cpp_host//:wasm_vm_headers",
     ],
+    alwayslink = 1,
 )
 
 # NB: Used to break the circular dependency between wasm_lib and null_plugin_lib.
@@ -28,7 +31,6 @@ envoy_cc_library(
         "wasm.h",
         "wasm_vm.h",
     ],
-    visibility = ["//visibility:public"],
     deps = [
         "//envoy/http:codes_interface",
         "//envoy/http:filter_interface",
@@ -49,9 +51,10 @@ envoy_cc_library(
         "@proxy_wasm_cpp_host//:headers",
         "@proxy_wasm_cpp_sdk//:common_lib",
     ],
+    alwayslink = 1,
 )
 
-envoy_cc_library(
+envoy_cc_extension(
     name = "wasm_lib",
     srcs = [
         "context.cc",
@@ -67,7 +70,11 @@ envoy_cc_library(
             "-DWASM_USE_CEL_PARSER",
         ],
     }),
-    visibility = ["//visibility:public"],
+    visibility = [
+        "//source/extensions:__subpackages__",
+        "//test/extensions:__subpackages__",
+        "//test/test_common:__subpackages__",
+    ],
     deps = [
         ":wasm_hdr",
         ":wasm_runtime_factory_interface",
@@ -105,4 +112,5 @@ envoy_cc_library(
             ],
         },
     ),
+    alwayslink = 1,
 )

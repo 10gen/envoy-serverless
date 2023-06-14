@@ -43,7 +43,7 @@ TEST_P(EchoIntegrationTest, Hello) {
         response.append(data.toString());
         conn.close(Network::ConnectionCloseType::FlushWrite);
       });
-  connection->run();
+  ASSERT_TRUE(connection->run());
   EXPECT_EQ("hello", response);
 }
 
@@ -78,8 +78,8 @@ filter_chains:
                                    .listenerManager()
                                    .listeners()[1]
                                    .get()
-                                   .listenSocketFactory()
-                                   .localAddress()
+                                   .listenSocketFactories()[0]
+                                   ->localAddress()
                                    ->ip()
                                    ->port();
 
@@ -90,7 +90,7 @@ filter_chains:
         response.append(data.toString());
         conn.close(Network::ConnectionCloseType::FlushWrite);
       });
-  connection->run();
+  ASSERT_TRUE(connection->run());
   EXPECT_EQ("hello", response);
 
   // Remove the listener.
@@ -115,9 +115,8 @@ filter_chains:
     auto connection2 = createConnectionDriver(
         new_listener_port, "hello",
         [](Network::ClientConnection&, const Buffer::Instance&) -> void { FAIL(); });
-    connection2->waitForConnection();
-    if (connection2->connection().state() == Network::Connection::State::Closed) {
-      connect_fail = true;
+    connect_fail = !connection2->waitForConnection();
+    if (!connect_fail) {
       break;
     } else {
       connection2->close();

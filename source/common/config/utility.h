@@ -29,7 +29,10 @@
 #include "source/common/protobuf/utility.h"
 #include "source/common/runtime/runtime_features.h"
 #include "source/common/singleton/const_singleton.h"
+#include "source/common/version/api_version.h"
+#include "source/common/version/api_version_struct.h"
 
+#include "absl/types/optional.h"
 #include "udpa/type/v1/typed_struct.pb.h"
 #include "xds/type/v3/typed_struct.pb.h"
 
@@ -188,6 +191,15 @@ public:
       const envoy::config::core::v3::ApiConfigSource& api_config_source);
 
   /**
+   * Gets the gRPC control plane management server from the API config source. The result is either
+   * a cluster name or a host name.
+   * @param api_config_source the config source to validate.
+   * @return the gRPC control plane server, or absl::nullopt if it couldn't be extracted.
+   */
+  static absl::optional<std::string>
+  getGrpcControlPlane(const envoy::config::core::v3::ApiConfigSource& api_config_source);
+
+  /**
    * Validate transport_api_version field in ApiConfigSource.
    * @param api_config_source the config source to extract transport API version from.
    * @throws DeprecatedMajorVersionException when the transport version is disabled.
@@ -195,14 +207,12 @@ public:
   template <class Proto> static void checkTransportVersion(const Proto& api_config_source) {
     const auto transport_api_version = api_config_source.transport_api_version();
     ASSERT_IS_MAIN_OR_TEST_THREAD();
-    if (transport_api_version == envoy::config::core::v3::ApiVersion::AUTO ||
-        transport_api_version == envoy::config::core::v3::ApiVersion::V2) {
-      Runtime::LoaderSingleton::getExisting()->countDeprecatedFeatureUse();
+    if (transport_api_version != envoy::config::core::v3::ApiVersion::V3) {
       const std::string& warning = fmt::format(
           "V2 (and AUTO) xDS transport protocol versions are deprecated in {}. "
-          "The v2 xDS major version is deprecated and disabled by default. Support for v2 will be "
-          "removed from Envoy at the start of Q1 2021. You may make use of v2 in Q4 2020 by "
-          "following the advice in https://www.envoyproxy.io/docs/envoy/latest/faq/api/transition.",
+          "The v2 xDS major version has been removed and is no longer supported. "
+          "You may be missing explicit V3 configuration of the transport API version, "
+          "see the advice in https://www.envoyproxy.io/docs/envoy/latest/faq/api/envoy_v3.",
           api_config_source.DebugString());
       ENVOY_LOG_MISC(warn, warning);
       throw DeprecatedMajorVersionException(warning);
@@ -292,7 +302,8 @@ public:
   template <class Factory, class ProtoMessage>
   static Factory* getFactory(const ProtoMessage& message) {
     Factory* factory = Utility::getFactoryByType<Factory>(message.typed_config());
-    if (factory != nullptr) {
+    if (factory != nullptr ||
+        Runtime::runtimeFeatureEnabled("envoy.reloadable_features.no_extension_lookup_by_name")) {
       return factory;
     }
 
@@ -309,7 +320,14 @@ public:
   template <class Factory, class ProtoMessage>
   static Factory* getAndCheckFactory(const ProtoMessage& message, bool is_optional) {
     Factory* factory = Utility::getFactoryByType<Factory>(message.typed_config());
-    if (factory != nullptr) {
+    if (Runtime::runtimeFeatureEnabled("envoy.reloadable_features.no_extension_lookup_by_name")) {
+      if (factory == nullptr && !is_optional) {
+        ExceptionUtil::throwEnvoyException(
+            fmt::format("Didn't find a registered implementation for '{}' with type URL: '{}'",
+                        message.name(), getFactoryType(message.typed_config())));
+      }
+      return factory;
+    } else if (factory != nullptr) {
       return factory;
     }
 
@@ -513,7 +531,72 @@ public:
     }
     return std::make_unique<FixedBackOffStrategy>(dns_refresh_rate_ms);
   }
-};
 
+  /**
+   * Returns Jittered Exponential BackOff Strategy from BackoffStrategy config if present or
+   * provided default timer values
+   * @param api_config_source config
+   * @param random random generator
+   * @param default_base_interval_ms  Default base interval, must be > 0
+   * @param default_max_interval_ms (optional) Default maximum interval
+   * @return JitteredExponentialBackOffStrategyPtr if 1. Backoff Strategy is
+   * found in the config or 2. default base interval and default maximum interval is specified or 3.
+   * max interval is set to 10*default base interval
+   */
+  static JitteredExponentialBackOffStrategyPtr prepareJitteredExponentialBackOffStrategy(
+      const envoy::config::core::v3::ApiConfigSource& api_config_source,
+      Random::RandomGenerator& random, const uint32_t default_base_interval_ms,
+      absl::optional<const uint32_t> default_max_interval_ms) {
+
+    auto& grpc_services = api_config_source.grpc_services();
+    if (!grpc_services.empty() && grpc_services[0].has_envoy_grpc()) {
+      return prepareJitteredExponentialBackOffStrategy(
+          grpc_services[0].envoy_grpc(), random, default_base_interval_ms, default_max_interval_ms);
+    }
+    return buildJitteredExponentialBackOffStrategy(absl::nullopt, random, default_base_interval_ms,
+                                                   default_max_interval_ms);
+  }
+
+  /**
+   * Prepares Jittered Exponential BackOff Strategy from config containing the Retry Policy
+   * @param config config containing RetryPolicy <envoy_v3_api_msg_config.core.v3.RetryPolicy>
+   * @param random random generator
+   * @param default_base_interval_ms  Default base interval, must be > 0
+   * @param default_max_interval_ms (optional) Default maximum interval
+   * @return JitteredExponentialBackOffStrategyPtr if 1. RetryPolicy containing backoff values is
+   * found in config or 2. default base interval and default maximum interval is specified or 3.
+   * default max interval is set to 10*default base interval
+   */
+  template <typename T>
+  static JitteredExponentialBackOffStrategyPtr prepareJitteredExponentialBackOffStrategy(
+      const T& config, Random::RandomGenerator& random, const uint32_t default_base_interval_ms,
+      absl::optional<const uint32_t> default_max_interval_ms) {
+    // If RetryPolicy containing backoff values is found in config
+    if (config.has_retry_policy() && config.retry_policy().has_retry_back_off()) {
+      return buildJitteredExponentialBackOffStrategy(config.retry_policy().retry_back_off(), random,
+                                                     default_base_interval_ms,
+                                                     default_max_interval_ms);
+    }
+    return buildJitteredExponentialBackOffStrategy(absl::nullopt, random, default_base_interval_ms,
+                                                   default_max_interval_ms);
+  }
+
+private:
+  /**
+   * Returns Jittered Exponential BackOff Strategy from BackoffStrategy config or default
+   * values
+   * @param config (optional) BackoffStrategy config
+   * @param random random generator
+   * @param default_base_interval_ms  Default base interval, must be > 0
+   * @param default_max_interval_ms (optional) Default maximum interval
+   * @return JitteredExponentialBackOffStrategyPtr if 1. Backoff Strategy is
+   * specified or 2. default base interval and default maximum interval is specified or 3.
+   * max interval is set to 10*default base interval
+   */
+  static JitteredExponentialBackOffStrategyPtr buildJitteredExponentialBackOffStrategy(
+      absl::optional<const envoy::config::core::v3::BackoffStrategy> backoff,
+      Random::RandomGenerator& random, const uint32_t default_base_interval_ms,
+      absl::optional<const uint32_t> default_max_interval_ms);
+};
 } // namespace Config
 } // namespace Envoy

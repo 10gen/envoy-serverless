@@ -15,9 +15,22 @@
 #include "source/common/common/hash.h"
 #include "source/common/common/non_copyable.h"
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/strings/string_view.h"
 
 namespace Envoy {
+
+/**
+ * Converts a `timespec` structure to a `std::chrono::time_point` aka. `Envoy::SystemTime`.
+ * @param t the `timespec`
+ * @return Envoy::SystemTime the same time, represented as a `std::chrono::time_point`,
+ *         to microsecond accuracy. (`SystemTime` does not accept nanosecond accuracy.)
+ */
+constexpr SystemTime timespecToChrono(const struct timespec& t) {
+  return SystemTime{} + std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::seconds{t.tv_sec} + std::chrono::nanoseconds{t.tv_nsec});
+}
 
 /**
  * Retrieve string description of error code
@@ -44,7 +57,7 @@ public:
    * @param time_source time keeping source.
    * @return std::string representing the GMT/UTC time of a TimeSource based on the format string.
    */
-  std::string now(TimeSource& time_source);
+  std::string now(TimeSource& time_source) const;
 
   /**
    * @return std::string the format string used.
@@ -514,7 +527,7 @@ public:
       begin = end;
     }
 
-    NOT_REACHED_GCOVR_EXCL_LINE;
+    PANIC("unexpectedly reached");
   }
 };
 
@@ -557,6 +570,11 @@ public:
       }
     }
     intervals_.insert(Interval(left, right));
+  }
+
+  bool test(Value value) const override {
+    const auto left_pos = intervals_.lower_bound(Interval(value, value + 1));
+    return left_pos != intervals_.end() && value >= left_pos->first && value < left_pos->second;
   }
 
   std::vector<Interval> toVector() const override {

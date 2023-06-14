@@ -2,6 +2,7 @@
 
 #include <memory>
 
+#include "source/common/buffer/buffer_impl.h"
 #include "source/common/quic/envoy_quic_utils.h"
 
 namespace Envoy {
@@ -46,6 +47,8 @@ quic::WriteResult EnvoyQuicPacketWriter::WritePacket(const char* buffer, size_t 
   return convertToQuicWriteResult(result);
 }
 
+absl::optional<int> EnvoyQuicPacketWriter::MessageTooBigErrorCode() const { return EMSGSIZE; }
+
 quic::QuicByteCount
 EnvoyQuicPacketWriter::GetMaxPacketSize(const quic::QuicSocketAddress& peer_address) const {
   Network::Address::InstanceConstSharedPtr remote_addr =
@@ -63,8 +66,7 @@ EnvoyQuicPacketWriter::GetNextWriteLocation(const quic::QuicIpAddress& self_ip,
       quicAddressToEnvoyAddressInstance(peer_address);
   Network::UdpPacketWriterBuffer write_location = envoy_udp_packet_writer_->getNextWriteLocation(
       local_addr == nullptr ? nullptr : local_addr->ip(), *remote_addr);
-  return quic::QuicPacketBuffer(reinterpret_cast<char*>(write_location.buffer_),
-                                write_location.release_buffer_);
+  return {reinterpret_cast<char*>(write_location.buffer_), write_location.release_buffer_};
 }
 
 quic::WriteResult EnvoyQuicPacketWriter::Flush() {

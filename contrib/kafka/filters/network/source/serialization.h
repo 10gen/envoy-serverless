@@ -943,6 +943,28 @@ private:
   Int64Deserializer low_bytes_deserializer_;
 };
 
+// Variable length encoding utilities.
+namespace VarlenUtils {
+
+/**
+ * Writes given unsigned int in variable-length encoding.
+ * Ref: org.apache.kafka.common.utils.ByteUtils.writeUnsignedVarint(int, ByteBuffer)
+ */
+uint32_t writeUnsignedVarint(const uint32_t arg, Bytes& dst);
+
+/**
+ * Writes given signed int in variable-length zig-zag encoding.
+ * Ref: org.apache.kafka.common.utils.ByteUtils.writeVarint(int, ByteBuffer)
+ */
+uint32_t writeVarint(const int32_t arg, Bytes& dst);
+
+/**
+ * Writes given long in variable-length zig-zag encoding.
+ * Ref: org.apache.kafka.common.utils.ByteUtils.writeVarlong(long, ByteBuffer)
+ */
+uint32_t writeVarlong(const int64_t arg, Bytes& dst);
+} // namespace VarlenUtils
+
 /**
  * Encodes provided argument in Kafka format.
  * In case of primitive types, this is done explicitly as per specification.
@@ -1133,6 +1155,14 @@ template <typename T> inline uint32_t EncodingContext::computeCompactSize(const 
  * This data type is not compacted, so we just point to non-compact implementation.
  */
 template <> inline uint32_t EncodingContext::computeCompactSize(const int32_t& arg) const {
+  return computeSize(arg);
+}
+
+/**
+ * Template overload for int64_t.
+ * This data type is not compacted, so we just point to non-compact implementation.
+ */
+template <> inline uint32_t EncodingContext::computeCompactSize(const int64_t& arg) const {
   return computeSize(arg);
 }
 
@@ -1378,6 +1408,14 @@ inline uint32_t EncodingContext::encodeCompact(const int32_t& arg, Buffer::Insta
 }
 
 /**
+ * int64_t is not encoded in compact fashion, so we just delegate to normal implementation.
+ */
+template <>
+inline uint32_t EncodingContext::encodeCompact(const int64_t& arg, Buffer::Instance& dst) {
+  return encode(arg, dst);
+}
+
+/**
  * Template overload for variable-length uint32_t (VAR_UINT).
  * Encode the value in 7-bit chunks + marker if field is the last one.
  * Details:
@@ -1385,23 +1423,10 @@ inline uint32_t EncodingContext::encodeCompact(const int32_t& arg, Buffer::Insta
  */
 template <>
 inline uint32_t EncodingContext::encodeCompact(const uint32_t& arg, Buffer::Instance& dst) {
-  uint32_t value = arg;
-
-  uint32_t elements_with_1 = 0;
-  // As long as there are bits set on indexes 8 or higher (counting from 1).
-  while ((value & ~(0x7f)) != 0) {
-    // Save next 7-bit batch with highest bit set.
-    const uint8_t el = (value & 0x7f) | 0x80;
-    dst.add(&el, sizeof(uint8_t));
-    value >>= 7;
-    elements_with_1++;
-  }
-
-  // After the loop has finished, we are certain that bit 8 = 0, so we can just add final element.
-  const uint8_t el = value;
-  dst.add(&el, sizeof(uint8_t));
-
-  return elements_with_1 + 1;
+  std::vector<unsigned char> tmp;
+  const uint32_t written = VarlenUtils::writeUnsignedVarint(arg, tmp);
+  dst.add(tmp.data(), written);
+  return written;
 }
 
 /**

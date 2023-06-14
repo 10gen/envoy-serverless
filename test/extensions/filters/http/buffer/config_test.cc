@@ -46,6 +46,18 @@ TEST(BufferFilterFactoryTest, BufferFilterCorrectProto) {
   cb(filter_callback);
 }
 
+TEST(BufferFilterFactoryTest, BufferFilterCorrectProtoUpstreamFactory) {
+  envoy::extensions::filters::http::buffer::v3::Buffer config;
+  config.mutable_max_request_bytes()->set_value(1028);
+
+  NiceMock<Server::Configuration::MockUpstreamHttpFactoryContext> context;
+  BufferFilterFactory factory;
+  Http::FilterFactoryCb cb = factory.createFilterFactoryFromProto(config, "stats", context);
+  Http::MockFilterChainFactoryCallbacks filter_callback;
+  EXPECT_CALL(filter_callback, addStreamDecoderFilter(_));
+  cb(filter_callback);
+}
+
 TEST(BufferFilterFactoryTest, BufferFilterEmptyProto) {
   BufferFilterFactory factory;
   auto empty_proto = factory.createEmptyConfigProto();
@@ -98,17 +110,6 @@ TEST(BufferFilterFactoryTest, BufferFilterRouteSpecificConfig) {
 
   const auto* inflated = dynamic_cast<const BufferFilterSettings*>(route_config.get());
   EXPECT_TRUE(inflated);
-}
-
-// Test that the deprecated extension name is disabled by default.
-// TODO(zuercher): remove when envoy.deprecated_features.allow_deprecated_extension_names is removed
-TEST(BufferFilterFactoryTest, DEPRECATED_FEATURE_TEST(DeprecatedExtensionFilterName)) {
-  const std::string deprecated_name = "envoy.buffer";
-
-  ASSERT_EQ(
-      nullptr,
-      Registry::FactoryRegistry<Server::Configuration::NamedHttpFilterConfigFactory>::getFactory(
-          deprecated_name));
 }
 
 } // namespace

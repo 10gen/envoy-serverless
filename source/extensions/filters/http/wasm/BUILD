@@ -15,7 +15,6 @@ envoy_cc_library(
     name = "wasm_filter_lib",
     srcs = ["wasm_filter.cc"],
     hdrs = ["wasm_filter.h"],
-    visibility = ["//visibility:public"],
     deps = [
         "//envoy/http:codes_interface",
         "//envoy/server:filter_config_interface",
@@ -23,6 +22,7 @@ envoy_cc_library(
         "//source/extensions/common/wasm:wasm_lib",
         "@envoy_api//envoy/extensions/filters/http/wasm/v3:pkg_cc_proto",
     ],
+    alwayslink = 1,
 )
 
 envoy_cc_extension(

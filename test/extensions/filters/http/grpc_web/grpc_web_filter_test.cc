@@ -8,7 +8,7 @@
 #include "source/common/http/codes.h"
 #include "source/common/http/header_map_impl.h"
 #include "source/common/http/headers.h"
-#include "source/common/stats/symbol_table_impl.h"
+#include "source/common/stats/symbol_table.h"
 #include "source/extensions/filters/http/grpc_web/grpc_web_filter.h"
 
 #include "test/mocks/http/mocks.h"
@@ -435,7 +435,7 @@ TEST_P(GrpcWebFilterTest, StatsNormalResponse) {
   EXPECT_EQ(Http::FilterHeadersStatus::Continue, filter_.decodeHeaders(request_headers, false));
 
   Http::TestResponseHeaderMapImpl continue_headers{{":status", "100"}};
-  EXPECT_EQ(Http::FilterHeadersStatus::Continue, filter_.encode1xxHeaders(continue_headers));
+  EXPECT_EQ(Http::Filter1xxHeadersStatus::Continue, filter_.encode1xxHeaders(continue_headers));
 
   Http::MetadataMap metadata_map{{"metadata", "metadata"}};
   EXPECT_EQ(Http::FilterMetadataStatus::Continue, filter_.encodeMetadata(metadata_map));

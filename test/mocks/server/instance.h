@@ -6,7 +6,7 @@
 #include "source/common/http/context_impl.h"
 #include "source/common/quic/quic_stat_names.h"
 #include "source/common/router/context_impl.h"
-#include "source/common/stats/symbol_table_impl.h"
+#include "source/common/stats/symbol_table.h"
 #include "source/extensions/transport_sockets/tls/context_manager_impl.h"
 
 #include "test/mocks/access_log/mocks.h"
@@ -46,11 +46,12 @@ public:
   MockInstance();
   ~MockInstance() override;
 
-  Secret::SecretManager& secretManager() override { return *(secret_manager_.get()); }
+  Secret::SecretManager& secretManager() override { return *(secret_manager_); }
 
-  MOCK_METHOD(Admin&, admin, ());
+  MOCK_METHOD(OptRef<Admin>, admin, ());
   MOCK_METHOD(Api::Api&, api, ());
   MOCK_METHOD(Upstream::ClusterManager&, clusterManager, ());
+  MOCK_METHOD(const Upstream::ClusterManager&, clusterManager, (), (const));
   MOCK_METHOD(Ssl::ContextManager&, sslContextManager, ());
   MOCK_METHOD(Event::Dispatcher&, dispatcher, ());
   MOCK_METHOD(Network::DnsResolverSharedPtr, dnsResolver, ());
@@ -58,7 +59,6 @@ public:
   MOCK_METHOD(DrainManager&, drainManager, ());
   MOCK_METHOD(AccessLog::AccessLogManager&, accessLogManager, ());
   MOCK_METHOD(void, failHealthcheck, (bool fail));
-  MOCK_METHOD(void, exportStatsToChild, (envoy::HotRestartMessage::Reply::Stats*));
   MOCK_METHOD(bool, healthCheckFailed, ());
   MOCK_METHOD(HotRestart&, hotRestart, ());
   MOCK_METHOD(Init::Manager&, initManager, ());
@@ -160,7 +160,7 @@ public:
   MOCK_METHOD(Stats::Scope&, serverScope, ());
   MOCK_METHOD(Singleton::Manager&, singletonManager, ());
   MOCK_METHOD(ThreadLocal::Instance&, threadLocal, ());
-  MOCK_METHOD(Server::Admin&, admin, ());
+  MOCK_METHOD(OptRef<Server::Admin>, admin, ());
   MOCK_METHOD(TimeSource&, timeSource, ());
   Event::TestTimeSystem& timeSystem() { return time_system_; }
   MOCK_METHOD(ProtobufMessage::ValidationContext&, messageValidationContext, ());
@@ -180,7 +180,7 @@ public:
   testing::NiceMock<MockDrainManager> drain_manager_;
   testing::NiceMock<LocalInfo::MockLocalInfo> local_info_;
   testing::NiceMock<Envoy::Runtime::MockLoader> runtime_loader_;
-  testing::NiceMock<Stats::MockIsolatedStatsStore> scope_;
+  testing::NiceMock<Stats::MockIsolatedStatsStore> store_;
   testing::NiceMock<ThreadLocal::MockInstance> thread_local_;
   testing::NiceMock<ProtobufMessage::MockValidationContext> validation_context_;
   testing::NiceMock<MockStatsConfig> stats_config_;
@@ -195,6 +195,7 @@ public:
   Grpc::ContextImpl grpc_context_;
   Router::ContextImpl router_context_;
   envoy::config::bootstrap::v3::Bootstrap bootstrap_;
+  testing::NiceMock<MockOptions> options_;
 };
 
 } // namespace Configuration

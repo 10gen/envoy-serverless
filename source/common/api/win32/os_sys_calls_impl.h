@@ -6,6 +6,8 @@
 
 #include "source/common/singleton/threadsafe_singleton.h"
 
+#define ENVOY_DEFAULT_PIPE_TYPE AF_INET
+
 namespace Envoy {
 namespace Api {
 
@@ -19,6 +21,10 @@ public:
                          unsigned long out_buffer_len, unsigned long* bytes_returned) override;
   SysCallSizeResult writev(os_fd_t fd, const iovec* iov, int num_iov) override;
   SysCallSizeResult readv(os_fd_t fd, const iovec* iov, int num_iov) override;
+  SysCallSizeResult pwrite(os_fd_t fd, const void* buffer, size_t length,
+                           off_t offset) const override;
+  SysCallSizeResult pread(os_fd_t fd, void* buffer, size_t length, off_t offset) const override;
+  SysCallSizeResult send(os_fd_t socket, void* buffer, size_t length, int flags) override;
   SysCallSizeResult recv(os_fd_t socket, void* buffer, size_t length, int flags) override;
   SysCallSizeResult recvmsg(os_fd_t sockfd, msghdr* msg, int flags) override;
   SysCallIntResult recvmmsg(os_fd_t sockfd, struct mmsghdr* msgvec, unsigned int vlen, int flags,
@@ -33,6 +39,7 @@ public:
   SysCallPtrResult mmap(void* addr, size_t length, int prot, int flags, int fd,
                         off_t offset) override;
   SysCallIntResult stat(const char* pathname, struct stat* buf) override;
+  SysCallIntResult fstat(os_fd_t fd, struct stat* buf) override;
   SysCallIntResult setsockopt(os_fd_t sockfd, int level, int optname, const void* optval,
                               socklen_t optlen) override;
   SysCallIntResult getsockopt(os_fd_t sockfd, int level, int optname, void* optval,
@@ -45,6 +52,13 @@ public:
   SysCallIntResult getpeername(os_fd_t sockfd, sockaddr* name, socklen_t* namelen) override;
   SysCallIntResult setsocketblocking(os_fd_t sockfd, bool blocking) override;
   SysCallIntResult connect(os_fd_t sockfd, const sockaddr* addr, socklen_t addrlen) override;
+  SysCallIntResult open(const char* pathname, int flags) const override;
+  SysCallIntResult open(const char* pathname, int flags, mode_t mode) const override;
+  SysCallIntResult unlink(const char* pathname) const override;
+  SysCallIntResult linkat(os_fd_t olddirfd, const char* oldpath, os_fd_t newdirfd,
+                          const char* newpath, int flags) const override;
+  SysCallIntResult mkstemp(char* tmplate) const override;
+  bool supportsAllPosixFileOperations() const override;
   SysCallIntResult shutdown(os_fd_t sockfd, int how) override;
   SysCallIntResult socketpair(int domain, int type, int protocol, os_fd_t sv[2]) override;
   SysCallIntResult listen(os_fd_t sockfd, int backlog) override;
@@ -54,6 +68,9 @@ public:
   SysCallBoolResult socketTcpInfo(os_fd_t sockfd, EnvoyTcpInfo* tcp_info) override;
   bool supportsGetifaddrs() const override;
   SysCallIntResult getifaddrs(InterfaceAddressVector&) override;
+  SysCallIntResult getaddrinfo(const char* node, const char* service, const addrinfo* hints,
+                               addrinfo** res) override;
+  void freeaddrinfo(addrinfo* res) override;
 };
 
 using OsSysCallsSingleton = ThreadSafeSingleton<OsSysCallsImpl>;
