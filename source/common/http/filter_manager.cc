@@ -322,7 +322,7 @@ Buffer::InstancePtr& ActiveStreamDecoderFilter::bufferedData() {
   return parent_.buffered_request_data_;
 }
 
-bool ActiveStreamDecoderFilter::complete() { return parent_.remoteDecodeComplete(); }
+bool ActiveStreamDecoderFilter::complete() { return parent_.state_.remote_decode_complete_; }
 
 void ActiveStreamDecoderFilter::doHeaders(bool end_stream) {
   parent_.decodeHeaders(this, *parent_.filter_manager_callbacks_.requestHeaders(), end_stream);
@@ -834,8 +834,9 @@ void FilterManager::decodeMetadata(ActiveStreamDecoderFilter* filter, MetadataMa
 }
 
 void FilterManager::maybeEndDecode(bool end_stream) {
-  // If recreateStream is called, the HCM rewinds state and may send more encodeData calls.
-  if (end_stream && !remoteDecodeComplete()) {
+  ASSERT(!state_.remote_decode_complete_);
+  state_.remote_decode_complete_ = end_stream;
+  if (end_stream) {
     stream_info_.downstreamTiming().onLastDownstreamRxByteReceived(dispatcher().timeSource());
     ENVOY_STREAM_LOG(debug, "request end stream", *this);
   }
