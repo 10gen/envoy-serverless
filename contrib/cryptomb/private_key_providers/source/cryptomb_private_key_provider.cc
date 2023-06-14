@@ -7,6 +7,7 @@
 
 #include "source/common/config/datasource.h"
 
+#include "openssl/ec.h"
 #include "openssl/ssl.h"
 
 namespace Envoy {
@@ -169,24 +170,31 @@ ssl_private_key_result_t rsaPrivateKeySignInternal(CryptoMbPrivateKeyConnection*
     return status;
   }
 
-  // Add RSA padding to the the hash. Only `PSS` padding is supported.
-  // TODO(ipuustin): add PKCS #1 v1.5 padding scheme later if requested.
-  if (!SSL_is_signature_algorithm_rsa_pss(signature_algorithm)) {
-    ops->logDebugMsg("non-supported RSA padding");
-    return status;
-  }
-
   uint8_t* msg;
   size_t msg_len;
+  int prefix_allocated = 0;
 
-  msg_len = RSA_size(rsa.get());
-  msg = static_cast<uint8_t*>(OPENSSL_malloc(msg_len));
-  if (msg == nullptr) {
-    return status;
-  }
-  if (!RSA_padding_add_PKCS1_PSS_mgf1(rsa.get(), msg, hash, md, nullptr, -1)) {
-    OPENSSL_free(msg);
-    return status;
+  // Add RSA padding to the the hash. Supported types are `PSS` and `PKCS1`.
+  if (SSL_is_signature_algorithm_rsa_pss(signature_algorithm)) {
+    msg_len = RSA_size(rsa.get());
+    // We have to do manual memory management here, because BoringSSL tells in `prefix_allocated`
+    // variable whether or not memory needs to be freed.
+    msg = static_cast<uint8_t*>(OPENSSL_malloc(msg_len));
+    if (msg == nullptr) {
+      return status;
+    }
+    prefix_allocated = 1;
+    if (!RSA_padding_add_PKCS1_PSS_mgf1(rsa.get(), msg, hash, md, nullptr, -1)) {
+      OPENSSL_free(msg);
+      return status;
+    }
+  } else {
+    if (!RSA_add_pkcs1_prefix(&msg, &msg_len, &prefix_allocated, EVP_MD_type(md), hash, hash_len)) {
+      if (prefix_allocated) {
+        OPENSSL_free(msg);
+      }
+      return status;
+    }
   }
 
   // Create MB context which will be used for this particular
@@ -195,13 +203,18 @@ ssl_private_key_result_t rsaPrivateKeySignInternal(CryptoMbPrivateKeyConnection*
       std::make_shared<CryptoMbRsaContext>(std::move(pkey), ops->dispatcher_, ops->cb_);
 
   if (!mb_ctx->rsaInit(msg, msg_len)) {
-    OPENSSL_free(msg);
+    if (prefix_allocated) {
+      OPENSSL_free(msg);
+    }
     return status;
+  }
+
+  if (prefix_allocated) {
+    OPENSSL_free(msg);
   }
 
   ops->addToQueue(mb_ctx);
   status = ssl_private_key_retry;
-  OPENSSL_free(msg);
   return status;
 }
 
