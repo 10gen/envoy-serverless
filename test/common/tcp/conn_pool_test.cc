@@ -323,7 +323,6 @@ public:
 
   void prepareConn() {
     connection_ = new StrictMock<Network::MockClientConnection>();
-    EXPECT_CALL(*connection_, connectionInfoSetter());
     EXPECT_CALL(*connection_, transportFailureReason()).Times(AtLeast(0));
     EXPECT_CALL(*connection_, setBufferLimits(0));
     EXPECT_CALL(*connection_, detectEarlyCloseWhenReadDisabled(false));

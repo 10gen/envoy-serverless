@@ -53,13 +53,8 @@ public:
   absl::optional<uint64_t> connectionID() const override { return connection_id_; }
   void setConnectionID(uint64_t id) override { connection_id_ = id; }
   absl::optional<absl::string_view> interfaceName() const override { return interface_name_; }
-  void enableSettingInterfaceName(const bool enable) override {
-    allow_syscall_for_interface_name_ = enable;
-  }
-  void maybeSetInterfaceName(IoHandle& io_handle) override {
-    if (allow_syscall_for_interface_name_) {
-      interface_name_ = io_handle.interfaceName();
-    }
+  void setInterfaceName(absl::string_view interface_name) override {
+    interface_name_ = std::string(interface_name);
   }
   Ssl::ConnectionInfoConstSharedPtr sslConnection() const override { return ssl_info_; }
   void setSslConnection(const Ssl::ConnectionInfoConstSharedPtr& ssl_connection_info) override {
@@ -76,7 +71,6 @@ private:
   Address::InstanceConstSharedPtr direct_remote_address_;
   std::string server_name_;
   absl::optional<uint64_t> connection_id_;
-  bool allow_syscall_for_interface_name_{false};
   absl::optional<std::string> interface_name_;
   Ssl::ConnectionInfoConstSharedPtr ssl_info_;
   std::string ja3_hash_;

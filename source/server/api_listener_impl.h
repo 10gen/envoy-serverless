@@ -130,10 +130,7 @@ protected:
         IS_ENVOY_BUG("Unexpected function call");
       }
       bool readEnabled() const override { return true; }
-      Network::ConnectionInfoSetter& connectionInfoSetter() override {
-        return *connection_info_provider_;
-      }
-      const Network::ConnectionInfoProvider& connectionInfoProvider() const override {
+      const Network::ConnectionInfoSetter& connectionInfoProvider() const override {
         return *connection_info_provider_;
       }
       Network::ConnectionInfoProviderSharedPtr connectionInfoProviderSharedPtr() const override {
