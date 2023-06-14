@@ -31,10 +31,7 @@ def get(service_number, response_id):
 
     # response.make_conditional() will change the response to a 304 response
     # if a 'if-none-match' header exists in the request and matches the etag
-    conditional_response = response.make_conditional(request)
-    # hacky workaround for flask's dodgy header handling
-    del conditional_response.headers["Date"]
-    return conditional_response
+    return response.make_conditional(request)
 
 
 if __name__ == "__main__":

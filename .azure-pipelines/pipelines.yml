@@ -486,7 +486,7 @@ stages:
   - job: release
     timeoutInMinutes: 120
     pool:
-      vmImage: "windows-2019"
+      vmImage: "windows-latest"
     steps:
     - task: Cache@2
       inputs:
@@ -522,7 +522,7 @@ stages:
     strategy:
       matrix:
         windows2019:
-          imageName: 'windows-2019'
+          imageName: 'windows-latest'
           windowsBuildType: "windows"
           windowsImageBase: "mcr.microsoft.com/windows/servercore"
           windowsImageTag: "ltsc2019"
