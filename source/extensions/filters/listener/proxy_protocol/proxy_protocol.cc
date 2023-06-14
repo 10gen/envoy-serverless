@@ -17,11 +17,9 @@
 #include "source/common/common/assert.h"
 #include "source/common/common/empty_string.h"
 #include "source/common/common/fmt.h"
-#include "source/common/common/hex.h"
 #include "source/common/common/safe_memcpy.h"
 #include "source/common/common/utility.h"
 #include "source/common/network/address_impl.h"
-#include "source/common/network/proxy_protocol_filter_state.h"
 #include "source/common/network/utility.h"
 #include "source/extensions/common/proxy_protocol/proxy_protocol_header.h"
 
@@ -61,11 +59,6 @@ const KeyValuePair* Config::isTlvTypeNeeded(uint8_t type) const {
   }
 
   return nullptr;
-}
-
-bool Config::isPassThroughTlvTypeNeeded(uint8_t) const {
-  // TODO: read config.
-  return true;
 }
 
 size_t Config::numberOfNeededTlvTypes() const { return tlv_types_.size(); }
@@ -110,25 +103,6 @@ ReadOrParseState Filter::onReadWorker() {
     if (read_ext_state != ReadOrParseState::Done) {
       return read_ext_state;
     }
-  }
-
-  if (proxy_protocol_header_.has_value() &&
-      !cb_->filterState().hasData<Network::ProxyProtocolFilterState>(
-          Network::ProxyProtocolFilterState::key())) {
-    if (!proxy_protocol_header_.value().local_command_) {
-      ENVOY_LOG(trace,
-                fmt::format("parsed proxy protocol header, length: {}, buffer: {}, "
-                            "TLV length: {}, TLV buffer: {}",
-                            buf_off_,
-                            Envoy::Hex::encode(reinterpret_cast<uint8_t*>(&buf_), buf_off_),
-                            buf_tlv_off_, Envoy::Hex::encode(buf_tlv_.data(), buf_tlv_off_)));
-    }
-    cb_->filterState().setData(
-        Network::ProxyProtocolFilterState::key(),
-        std::make_unique<Network::ProxyProtocolFilterState>(Network::ProxyProtocolData{
-            proxy_protocol_header_.value().remote_address_,
-            proxy_protocol_header_.value().local_address_, parsed_tlvs_}),
-        StreamInfo::FilterState::StateType::Mutable, StreamInfo::FilterState::LifeSpan::Connection);
   }
 
   if (proxy_protocol_header_.has_value() && !proxy_protocol_header_.value().local_command_) {
@@ -392,11 +366,11 @@ bool Filter::parseTlvs(const std::vector<uint8_t>& tlvs) {
     }
 
     // Only save to dynamic metadata if this type of TLV is needed.
-    absl::string_view tlv_value(reinterpret_cast<char const*>(tlvs.data() + idx), tlv_value_length);
     auto key_value_pair = config_->isTlvTypeNeeded(tlv_type);
     if (nullptr != key_value_pair) {
       ProtobufWkt::Value metadata_value;
-      metadata_value.set_string_value(tlv_value.data(), tlv_value.size());
+      metadata_value.set_string_value(reinterpret_cast<char const*>(tlvs.data() + idx),
+                                      tlv_value_length);
 
       std::string metadata_key = key_value_pair->metadata_namespace().empty()
                                      ? "envoy.filters.listener.proxy_protocol"
@@ -410,12 +384,6 @@ bool Filter::parseTlvs(const std::vector<uint8_t>& tlvs) {
       ENVOY_LOG(trace, "proxy_protocol: Skip TLV of type {} since it's not needed", tlv_type);
     }
 
-    // Save TLV to the filter state.
-    if (config_->isPassThroughTlvTypeNeeded(tlv_type)) {
-      ENVOY_LOG(trace, "proxy_protocol: Storing parsed TLV of type {}", tlv_type);
-      parsed_tlvs_.push_back({tlv_type, std::string(tlv_value)});
-    }
-
     idx += tlv_value_length;
     ASSERT(idx <= tlvs.size());
   }
@@ -423,8 +391,9 @@ bool Filter::parseTlvs(const std::vector<uint8_t>& tlvs) {
 }
 
 ReadOrParseState Filter::readExtensions(Network::IoHandle& io_handle) {
-  // Parse and discard the extensions if this is a local command.
-  if (proxy_protocol_header_.value().local_command_) {
+  // Parse and discard the extensions if this is a local command or there's no TLV needs to be saved
+  // to metadata.
+  if (proxy_protocol_header_.value().local_command_ || 0 == config_->numberOfNeededTlvTypes()) {
     // buf_ is no longer in use so we re-use it to read/discard.
     return parseExtensions(io_handle, reinterpret_cast<uint8_t*>(buf_), sizeof(buf_), nullptr);
   }
