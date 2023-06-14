@@ -40,7 +40,9 @@ extensions/filters/common/original_src @snowp @klarose
 # header_to_metadata extension
 /*/extensions/filters/http/header_to_metadata @rgs1 @zuercher
 # alts transport socket extension
-/*/extensions/transport_sockets/alts @antoniovicente @asraa @yangminzhu
+/*/extensions/transport_sockets/alts @antoniovicente @adisuissa @yangminzhu
+# tcp_stats transport socket extension
+/*/extensions/transport_sockets/tcp_stats @ggreenway @mattklein123
 # tls transport socket extension
 /*/extensions/transport_sockets/tls @lizan @ggreenway
 # tls SPIFFE certificate validator extension
