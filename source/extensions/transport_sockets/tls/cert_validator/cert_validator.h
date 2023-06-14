@@ -62,10 +62,7 @@ public:
                                     bool handshaker_provides_certificates) PURE;
 
   /**
-   * Called when calculation hash for session context ids. This hash MUST include all
-   * configuration used to validate a peer certificate, so that if this configuration
-   * is changed, sessions cannot be re-used and must be re-negotiated and re-validated
-   * using the new settings.
+   * Called when calculation hash for session context ids
    *
    * @param md the store context
    * @param hash_buffer the buffer used for digest calculation
