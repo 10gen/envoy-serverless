@@ -8,7 +8,7 @@ set -x
 
 source $(dirname "$0")/setup_env.sh
 
-# Create a symlink to the location of the python3 binary. Overwrite existing system python3 binary available on al2022 (and there's no python3 binary in /usr/bin on centos7 and al2). 
+# Create a symlink to the location of the python3 binary. Overwrite existing system python3 binary if available.
 ln -sf /opt/mongodbtoolchain/v4/bin/python3 /usr/bin/python3
 
 # Test targets listed in repo's .bazelci config
