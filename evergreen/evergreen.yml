@@ -161,7 +161,8 @@ buildvariants:
   tasks:
   - name: docker_build
   - name: compile
-  - name: test
+  # CLOUDP-184237: Only run envoy tests on al2-aarch64. 
+  # - name: test 
   - name: push
 
 - name: al2-aarch64
