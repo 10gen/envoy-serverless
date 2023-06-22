@@ -15,6 +15,7 @@
 
 #include "source/common/api/os_sys_calls_impl.h"
 #include "source/common/common/assert.h"
+#include "source/common/common/base64.h"
 #include "source/common/common/empty_string.h"
 #include "source/common/common/fmt.h"
 #include "source/common/common/thread.h"
@@ -23,6 +24,7 @@
 #include "source/common/grpc/common.h"
 #include "source/common/grpc/status.h"
 #include "source/common/http/utility.h"
+#include "source/common/network/proxy_protocol_filter_state.h"
 #include "source/common/protobuf/message_validator_impl.h"
 #include "source/common/protobuf/utility.h"
 #include "source/common/runtime/runtime_features.h"
@@ -475,6 +477,11 @@ SubstitutionFormatParser::getKnownFormatters() {
         {CommandSyntaxChecker::PARAMS_OPTIONAL | CommandSyntaxChecker::LENGTH_ALLOWED,
          [](const std::string& format, const absl::optional<size_t>& max_length) {
            return FilterStateFormatter::create(format, max_length, false);
+         }}},
+       {"PROXY_PROTOCOL_TLVS",
+        {CommandSyntaxChecker::PARAMS_REQUIRED,
+         [](const std::string& tlv_type, const absl::optional<size_t>&) {
+           return std::make_unique<ProxyProtocolTlvsFormatter>(tlv_type);
          }}},
        {"UPSTREAM_FILTER_STATE",
         {CommandSyntaxChecker::PARAMS_OPTIONAL | CommandSyntaxChecker::LENGTH_ALLOWED,
@@ -2084,6 +2091,62 @@ UpstreamHostMetadataFormatter::UpstreamHostMetadataFormatter(const std::string& 
                           }
                           return host->metadata().get();
                         }) {}
+
+ProxyProtocolTlvsFormatter::ProxyProtocolTlvsFormatter(const std::string& tlv_type_str) {
+  // Specified tlv_type must be parsable as an int.
+  ASSERT(!tlv_type_str.empty());
+  if (!absl::SimpleAtoi(tlv_type_str, &tlv_type_)) {
+    throw EnvoyException(fmt::format(
+        "Invalid parameter provided for PROXY_PROTOCOL_TLVS header: {}. Not parsable as int.",
+        tlv_type_str));
+  }
+
+  // Check if a valid TLV type was passed in.
+  if (tlv_type_ >= 256 || tlv_type_ <= 0) {
+    throw EnvoyException(fmt::format("Invalid parameter provided for PROXY_PROTOCOL_TLVS header: "
+                                     "{}. Must be a positive integer less than 256.",
+                                     tlv_type_str));
+  }
+}
+
+absl::optional<std::string> ProxyProtocolTlvsFormatter::format(
+    const Http::RequestHeaderMap&, const Http::ResponseHeaderMap&, const Http::ResponseTrailerMap&,
+    const StreamInfo::StreamInfo& stream_info, absl::string_view) const {
+  const auto& typed_state =
+      stream_info.filterState().getDataReadOnly<Network::ProxyProtocolFilterState>(
+          Network::ProxyProtocolFilterState::key());
+
+  // ProxyProtocolFilterState is not stored in the filter state.
+  if (typed_state == nullptr) {
+    ENVOY_LOG_MISC(debug, "Invalid header: PROXY_PROTOCOL_TLVS. The ProxyProtocolFilterState is "
+                          "not stored in the filter state.");
+    return absl::nullopt;
+  }
+
+  std::ostringstream oss;
+  int match_count = 0;
+  for (auto& tlv : typed_state->value().tlv_vector_) {
+    if (tlv.type == tlv_type_) {
+      if (match_count > 0)
+        oss << ", ";
+      oss << Base64::encode(reinterpret_cast<const char*>(tlv.value.data()), tlv.value.size());
+      match_count++;
+    }
+  }
+  ENVOY_LOG_MISC(
+      debug,
+      "Formatting PROXY_PROTOCOL_TLVS header: {} TLVs are stored. {} with type {} added to header.",
+      typed_state->value().tlv_vector_.size(), match_count, tlv_type_);
+  return oss.str();
+}
+
+ProtobufWkt::Value ProxyProtocolTlvsFormatter::formatValue(
+    const Http::RequestHeaderMap& request_headers, const Http::ResponseHeaderMap& response_headers,
+    const Http::ResponseTrailerMap& response_trailers, const StreamInfo::StreamInfo& stream_info,
+    absl::string_view local_reply_body) const {
+  return ValueUtil::optionalStringValue(
+      format(request_headers, response_headers, response_trailers, stream_info, local_reply_body));
+}
 
 std::unique_ptr<FilterStateFormatter>
 FilterStateFormatter::create(const std::string& format, const absl::optional<size_t>& max_length,

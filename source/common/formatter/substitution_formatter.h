@@ -598,6 +598,24 @@ private:
 };
 
 /**
+ * FormatterProvider for ProxyProtocolTlvs stored in FilterState from StreamInfo.
+ */
+class ProxyProtocolTlvsFormatter : public FormatterProvider {
+public:
+  ProxyProtocolTlvsFormatter(const std::string& tlv_type);
+  // FormatterProvider
+  absl::optional<std::string> format(const Http::RequestHeaderMap&, const Http::ResponseHeaderMap&,
+                                     const Http::ResponseTrailerMap&, const StreamInfo::StreamInfo&,
+                                     absl::string_view) const override;
+  ProtobufWkt::Value formatValue(const Http::RequestHeaderMap&, const Http::ResponseHeaderMap&,
+                                 const Http::ResponseTrailerMap&, const StreamInfo::StreamInfo&,
+                                 absl::string_view) const override;
+
+private:
+  int tlv_type_;
+};
+
+/**
  * Base FormatterProvider for system times from StreamInfo.
  */
 class SystemTimeFormatter : public FormatterProvider {
