@@ -2685,13 +2685,13 @@ TEST(SubstitutionFormatterTest, ProxyProtocolTlvsFormatter) {
     auto providers = SubstitutionFormatParser::parse("%PROXY_PROTOCOL_TLVS(2)%");
     ASSERT_EQ(providers.size(), 1);
     EXPECT_EQ(absl::nullopt, providers[0]->format(request_headers, response_headers,
-                                                  response_trailers, stream_info, body));
+                                                  response_trailers, stream_info, body, AccessLog::AccessLogType::NotSet));
   }
 
   // No TLVs stored in FilterState with specified tlv_type
   {
     NiceMock<StreamInfo::MockStreamInfo> stream_info;
-    Network::ProxyProtocolTLV tlv{0x5, "1"};
+    Network::ProxyProtocolTLV tlv{0x5, {'1'}};
     Network::ProxyProtocolData proxy_proto_data{src_addr, dst_addr, {tlv}};
     stream_info.filter_state_->setData(
         Network::ProxyProtocolFilterState::key(),
@@ -2701,13 +2701,13 @@ TEST(SubstitutionFormatterTest, ProxyProtocolTlvsFormatter) {
     auto providers = SubstitutionFormatParser::parse("%PROXY_PROTOCOL_TLVS(2)%");
     ASSERT_EQ(providers.size(), 1);
     EXPECT_EQ("", providers[0]->format(request_headers, response_headers, response_trailers,
-                                       stream_info, body));
+                                       stream_info, body, AccessLog::AccessLogType::NotSet));
   }
 
   // Success case - only 1 TLV value of the associated type stored in the filter state
   {
     NiceMock<StreamInfo::MockStreamInfo> stream_info;
-    Network::ProxyProtocolTLV tlv_one{0x5, "\6\7"s};
+    Network::ProxyProtocolTLV tlv_one{0x5, {'\6', '\7'}};
     Network::ProxyProtocolData proxy_proto_data{src_addr, dst_addr, {tlv_one}};
     stream_info.filter_state_->setData(
         Network::ProxyProtocolFilterState::key(),
@@ -2716,16 +2716,16 @@ TEST(SubstitutionFormatterTest, ProxyProtocolTlvsFormatter) {
     auto providers = SubstitutionFormatParser::parse("%PROXY_PROTOCOL_TLVS(5)%");
     ASSERT_EQ(providers.size(), 1);
     EXPECT_EQ("Bgc=", providers[0]->format(request_headers, response_headers, response_trailers,
-                                           stream_info, body));
+                                           stream_info, body, AccessLog::AccessLogType::NotSet));
   }
 
   // Success case - 2 TLV values of the associated type stored in the filter state, 1 TLV value with
   // different type stored
   {
     NiceMock<StreamInfo::MockStreamInfo> stream_info;
-    Network::ProxyProtocolTLV tlv_one{0x5, "\6\7"s};
-    Network::ProxyProtocolTLV tlv_two{0x5, "\6\4"s};
-    Network::ProxyProtocolTLV tlv_three{0x2, "\6\3"s};
+    Network::ProxyProtocolTLV tlv_one{0x5, {'\6', '\7'}};
+    Network::ProxyProtocolTLV tlv_two{0x5, {'\6', '\4'}};
+    Network::ProxyProtocolTLV tlv_three{0x2, {'\6', '\3'}};
     Network::ProxyProtocolData proxy_proto_data{src_addr, dst_addr, {tlv_one, tlv_two, tlv_three}};
     stream_info.filter_state_->setData(
         "envoy.network.proxy_protocol_options",
@@ -2734,7 +2734,7 @@ TEST(SubstitutionFormatterTest, ProxyProtocolTlvsFormatter) {
     auto providers = SubstitutionFormatParser::parse("%PROXY_PROTOCOL_TLVS(5)%");
     ASSERT_EQ(providers.size(), 1);
     EXPECT_EQ("Bgc=, BgQ=", providers[0]->format(request_headers, response_headers,
-                                                 response_trailers, stream_info, body));
+                                                 response_trailers, stream_info, body, AccessLog::AccessLogType::NotSet));
   }
 }
 

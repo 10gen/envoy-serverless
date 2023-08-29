@@ -2111,7 +2111,7 @@ ProxyProtocolTlvsFormatter::ProxyProtocolTlvsFormatter(const std::string& tlv_ty
 
 absl::optional<std::string> ProxyProtocolTlvsFormatter::format(
     const Http::RequestHeaderMap&, const Http::ResponseHeaderMap&, const Http::ResponseTrailerMap&,
-    const StreamInfo::StreamInfo& stream_info, absl::string_view) const {
+    const StreamInfo::StreamInfo& stream_info, absl::string_view, AccessLog::AccessLogType) const {
   const auto& typed_state =
       stream_info.filterState().getDataReadOnly<Network::ProxyProtocolFilterState>(
           Network::ProxyProtocolFilterState::key());
@@ -2143,9 +2143,9 @@ absl::optional<std::string> ProxyProtocolTlvsFormatter::format(
 ProtobufWkt::Value ProxyProtocolTlvsFormatter::formatValue(
     const Http::RequestHeaderMap& request_headers, const Http::ResponseHeaderMap& response_headers,
     const Http::ResponseTrailerMap& response_trailers, const StreamInfo::StreamInfo& stream_info,
-    absl::string_view local_reply_body) const {
+    absl::string_view local_reply_body, AccessLog::AccessLogType access_log_type) const {
   return ValueUtil::optionalStringValue(
-      format(request_headers, response_headers, response_trailers, stream_info, local_reply_body));
+      format(request_headers, response_headers, response_trailers, stream_info, local_reply_body, access_log_type));
 }
 
 std::unique_ptr<FilterStateFormatter>
