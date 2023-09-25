@@ -49,8 +49,19 @@ private:
   friend class AsyncStreamImpl;
 };
 
+template <typename T> class CarryOn {
+public:
+  T& carryOn() { return carry_on_; }
+  void setCarryOn(T&& carry_on) { carry_on_ = std::move(carry_on); }
+
+protected:
+  CarryOn() = default;
+  T carry_on_;
+};
+
 class AsyncStreamImpl : public RawAsyncStream,
                         Http::AsyncClient::StreamCallbacks,
+                        public CarryOn<std::unique_ptr<RawAsyncStreamCallbacks>>,
                         public Event::DeferredDeletable,
                         public LinkedObject<AsyncStreamImpl> {
 public:
