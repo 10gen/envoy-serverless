@@ -49,19 +49,22 @@ private:
   friend class AsyncStreamImpl;
 };
 
-template <typename T> class CarryOn {
+// CallbackHolder is a mixin class that holds a callback that has a lifetime
+// as long as the object that holds it.
+class CallbackHolder {
 public:
-  T& carryOn() { return carry_on_; }
-  void setCarryOn(T&& carry_on) { carry_on_ = std::move(carry_on); }
+  typedef std::unique_ptr<RawAsyncStreamCallbacks> CallbackPtr;
+  CallbackPtr& callbackHolder() { return callback_; }
+  void setCallbackHolder(CallbackPtr&& callback) { callback_ = std::move(callback); }
 
 protected:
-  CarryOn() = default;
-  T carry_on_;
+  CallbackHolder() = default;
+  CallbackPtr callback_;
 };
 
 class AsyncStreamImpl : public RawAsyncStream,
                         Http::AsyncClient::StreamCallbacks,
-                        public CarryOn<std::unique_ptr<RawAsyncStreamCallbacks>>,
+                        public CallbackHolder,
                         public Event::DeferredDeletable,
                         public LinkedObject<AsyncStreamImpl> {
 public:
