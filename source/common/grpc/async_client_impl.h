@@ -50,8 +50,22 @@ private:
   friend class AsyncStreamImpl;
 };
 
+// CallbackHolder is a mixin class that holds a callback that has a lifetime
+// as long as the object that holds it.
+class CallbackHolder {
+public:
+  typedef std::unique_ptr<RawAsyncStreamCallbacks> CallbackPtr;
+  CallbackPtr& getHeldCallback() { return callback_; }
+  void setHeldCallback(CallbackPtr&& callback) { callback_ = std::move(callback); }
+
+protected:
+  CallbackHolder() = default;
+  CallbackPtr callback_;
+};
+
 class AsyncStreamImpl : public RawAsyncStream,
                         Http::AsyncClient::StreamCallbacks,
+                        public CallbackHolder,
                         public Event::DeferredDeletable,
                         public LinkedObject<AsyncStreamImpl> {
 public:
