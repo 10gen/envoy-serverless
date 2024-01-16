@@ -74,8 +74,8 @@ git_version_number=$(git describe --tags --dirty --always --match 'v[0-9]*' --ab
 root_dir="$(git rev-parse --show-toplevel)"
 
 # If this RELEASE_VERSION file exists then include it in the version used to label built binaries
-if [ -f "${root_dir}/bazel/RELEASE_VERSION" ]; then
-    release_version_prefix=$(cat "${root_dir}/bazel/RELEASE_VERSION")
+if [ -f "${root_dir}/RELEASE_VERSION" ]; then
+    release_version_prefix=$(cat "${root_dir}/RELEASE_VERSION")
     git_version_number="${release_version_prefix}-${git_version_number}"
 fi
 
