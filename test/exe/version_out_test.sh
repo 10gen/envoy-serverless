@@ -18,7 +18,7 @@ if [[ "${COMMIT}" != "${EXPECTED}" ]]; then
 fi
 
 VERSION=$(${ENVOY_BIN} --version | \
-  sed -n -E 's/.*version: ([0-9a-f]{40})\/([0-9]+-)?([0-9]+\.[0-9]+\.[0-9]+)(-[a-zA-Z0-9_\-]+)?\/(Clean|Modified)\/(RELEASE|DEBUG)\/([a-zA-Z-]+)$/\3\4/p')
+  sed -n -E 's/.*version: ([0-9a-f]{40})\/([0-9]+-)?([0-9]+\.[0-9]+\.[0-9]+)(-[a-zA-Z0-9_\-]+)?\/(Clean|Modified)\/(RELEASE|DEBUG)\/([a-zA-Z-]+)$/\2\3\4/p')
 
 EXPECTED=$(cat "${TEST_SRCDIR}/envoy/bazel/git_version.txt")
 
