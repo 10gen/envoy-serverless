@@ -52,8 +52,8 @@ functions:
       env:
         # Set the AWS access/secret keys of evergreen_serverless_proxy_test_user as environment variables.
         # See https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html#cli-configure-files-methods.
-        AWS_ACCESS_KEY_ID: ${serverless_proxy_aws_key}
-        AWS_SECRET_ACCESS_KEY: ${serverless_proxy_secret_key}
+        AWS_ACCESS_KEY_ID: ${SECRET_serverless_proxy_aws_key}
+        AWS_SECRET_ACCESS_KEY: ${SECRET_serverless_proxy_secret_key}
 
   "test envoy":
     command: subprocess.exec
@@ -64,8 +64,8 @@ functions:
       env:
         # Set the AWS access/secret keys of evergreen_serverless_proxy_test_user as environment variables.
         # See https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html#cli-configure-files-methods.
-        AWS_ACCESS_KEY_ID: ${serverless_proxy_aws_key}
-        AWS_SECRET_ACCESS_KEY: ${serverless_proxy_secret_key}
+        AWS_ACCESS_KEY_ID: ${SECRET_serverless_proxy_aws_key}
+        AWS_SECRET_ACCESS_KEY: ${SECRET_serverless_proxy_secret_key}
 
   "archive":
     command: subprocess.exec
@@ -81,8 +81,8 @@ functions:
   "s3 upload archive":
     command: s3.put
     params:
-      aws_key: ${release_aws_key}
-      aws_secret: ${release_aws_secret}
+      aws_key: ${SECRET_release_aws_key}
+      aws_secret: ${SECRET_release_aws_secret}
       bucket: mongodb-mms-build-envoy-serverless
       local_files_include_filter: ["*.tar.gz"]
       local_files_include_filter_prefix: "archive"
@@ -100,8 +100,8 @@ functions:
         echo "creating config file"
         echo "[default]" > conf.aws
         chmod 700 conf.aws
-        echo aws_access_key_id=${release_aws_key} >> conf.aws
-        echo aws_secret_access_key=${release_aws_secret} >> conf.aws
+        echo aws_access_key_id=${SECRET_release_aws_key} >> conf.aws
+        echo aws_secret_access_key=${SECRET_release_aws_secret} >> conf.aws
         # Create a credentials file for AWS S3 CLI
         echo "creating credentials file"
         echo "[default]" > cred.aws
@@ -145,8 +145,8 @@ functions:
       env:
         # Set the AWS access/secret keys of evergreen_serverless_proxy_test_user as environment variables.
         # See https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html#cli-configure-files-methods.
-        AWS_ACCESS_KEY_ID: ${serverless_proxy_aws_key}
-        AWS_SECRET_ACCESS_KEY: ${serverless_proxy_secret_key}
+        AWS_ACCESS_KEY_ID: ${SECRET_serverless_proxy_aws_key}
+        AWS_SECRET_ACCESS_KEY: ${SECRET_serverless_proxy_secret_key}
 
 buildvariants:
 - name: centos7
