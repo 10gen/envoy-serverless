@@ -93,6 +93,7 @@ functions:
   "create push credentials":
     command: shell.exec
     params:
+      silent: true
       working_dir: .
       script: |
         set -e
