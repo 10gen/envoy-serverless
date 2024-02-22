@@ -202,7 +202,16 @@ void AsyncStreamImpl::sendMessage(const Protobuf::Message& request, bool end_str
 
 void AsyncStreamImpl::sendMessageRaw(Buffer::InstancePtr&& buffer, bool end_stream) {
   Common::prependGrpcFrameHeader(*buffer);
-  stream_->sendData(*buffer, end_stream);
+  if (buffer->length() < 2) {
+    stream_->sendData(*buffer, end_stream);
+  } else {
+    // Split the buffer into two buffers and send them separately, where each buffer contains half.
+    Buffer::OwnedImpl first_slice;
+    buffer->move(first_slice, buffer->length() / 2);
+    stream_->sendData(first_slice, false);
+    stream_->sendData(*buffer, end_stream);
+  }
+  // stream_->sendData(*buffer, end_stream);
 }
 
 void AsyncStreamImpl::closeStream() {
