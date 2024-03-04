@@ -55,11 +55,15 @@ class CallbackHolder {
 public:
   typedef std::unique_ptr<RawAsyncStreamCallbacks> CallbackPtr;
   CallbackPtr& getHeldCallback() { return callback_; }
-  void setHeldCallback(CallbackPtr&& callback) { callback_ = std::move(callback); }
+  void setHeldCallback(CallbackPtr&& callback, RawAsyncClientSharedPtr client = nullptr) {
+    callback_ = std::move(callback);
+    client_ = client;
+  }
 
 protected:
   CallbackHolder() = default;
   CallbackPtr callback_;
+  RawAsyncClientSharedPtr client_;
 };
 
 class AsyncStreamImpl : public RawAsyncStream,
