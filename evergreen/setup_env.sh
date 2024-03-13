@@ -5,7 +5,7 @@
 
 set -xeuo pipefail
 
-export bazel_flags="--config=linux --config=clang -c opt --action_env=PATH --verbose_failures -k"
+export bazel_flags="--config=linux --config=clang --copt=-fsized-deallocation -c opt --action_env=PATH --verbose_failures -k"
 
 if grep -q "CentOS Linux 7" /etc/os-release; then
   echo "Using MongoDB toolchain on CentOS Linux 7"
