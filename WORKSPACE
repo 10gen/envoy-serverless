@@ -14,7 +14,9 @@ envoy_dependencies()
 
 load("//bazel:repositories_extra.bzl", "envoy_dependencies_extra")
 
-envoy_dependencies_extra()
+# Bazel's `rules_python` fails when run as root. There are cases when we have to run Python targets
+# with root (i.e. in Docker containers) requiring setting `ignore_root_user_error=True`.
+envoy_dependencies_extra(ignore_root_user_error=True)
 
 load("//bazel:python_dependencies.bzl", "envoy_python_dependencies")
 
