@@ -126,7 +126,7 @@ public:
   ProxyProtocolTlvsFormatter(const std::string& tlv_type);
   // StreamInfoFormatterProvider
   absl::optional<std::string> format(const StreamInfo::StreamInfo&) const override;
-  
+
   ProtobufWkt::Value formatValue(const StreamInfo::StreamInfo&) const override;
 
 private:

@@ -2140,7 +2140,7 @@ TEST(SubstitutionFormatterTest, ProxyProtocolTlvsFormatter) {
       Network::Address::InstanceConstSharedPtr(new Network::Address::Ipv4Instance("1.2.3.4", 773));
   auto dst_addr =
       Network::Address::InstanceConstSharedPtr(new Network::Address::Ipv4Instance("0.1.1.2", 513));
-    
+
   // No parameter value passed in for tlv_type.
   {
     EXPECT_THROW_WITH_MESSAGE(SubstitutionFormatParser::parse("%PROXY_PROTOCOL_TLVS()%"),

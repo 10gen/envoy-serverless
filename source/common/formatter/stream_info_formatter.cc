@@ -451,11 +451,12 @@ ProxyProtocolTlvsFormatter::ProxyProtocolTlvsFormatter(const std::string& tlv_ty
   }
 }
 
-absl::optional<std::string> ProxyProtocolTlvsFormatter::format(const StreamInfo::StreamInfo& stream_info) const {
+absl::optional<std::string>
+ProxyProtocolTlvsFormatter::format(const StreamInfo::StreamInfo& stream_info) const {
   const auto& typed_state =
       stream_info.filterState().getDataReadOnly<Network::ProxyProtocolFilterState>(
           Network::ProxyProtocolFilterState::key());
-  
+
   // ProxyProtocolFilterState is not stored in the filter state.
   if (typed_state == nullptr) {
     ENVOY_LOG_MISC(debug, "Invalid header: PROXY_PROTOCOL_TLVS. The ProxyProtocolFilterState is "
@@ -480,7 +481,8 @@ absl::optional<std::string> ProxyProtocolTlvsFormatter::format(const StreamInfo:
   return oss.str();
 }
 
-ProtobufWkt::Value ProxyProtocolTlvsFormatter::formatValue(const StreamInfo::StreamInfo& stream_info) const {
+ProtobufWkt::Value
+ProxyProtocolTlvsFormatter::formatValue(const StreamInfo::StreamInfo& stream_info) const {
   return ValueUtil::optionalStringValue(format(stream_info));
 }
 
