@@ -11,6 +11,10 @@ bug_fixes:
 - area: jwt_authn
   change: |
     Fixed JWT extractor, which concatenated headers with a comma, resultig in invalid tokens.
+- area: router
+  change: |
+    Fix a timing issue when upstream requests are empty when decoding data and send local reply when that happends. This is
+    controlled by ``envoy_reloadable_features_send_local_reply_when_no_buffer_and_upstream_request``.
 
 new_features:
 - area: google_grpc
