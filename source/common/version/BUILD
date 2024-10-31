@@ -18,6 +18,23 @@ genrule(
     visibility = ["//visibility:private"],
 )
 
+# This genrule generates a header file linking GIT_VERSION_NUMBER to version.h for labeling built binaries using the workspace status command output.
+genrule(
+    name = "generate_git_version_number",
+    outs = ["git_version_number.h"],
+    cmd = """
+      grep GIT_VERSION_NUMBER bazel-out/volatile-status.txt \\
+    | sed 's/^GIT_VERSION_NUMBER //' \\
+    | tr -d '\\n' \\
+    | xargs -I{} echo "#define GIT_VERSION_NUMBER \\"{}\\"" \\
+    > $@
+    """,
+    # Undocumented attr to depend on workspace status files.
+    # https://github.com/bazelbuild/bazel/issues/4942
+    stamp = 1,
+    visibility = ["//visibility:private"],
+)
+
 genrule(
     name = "generate_api_version_number",
     srcs = ["//:API_VERSION.txt"],
@@ -47,6 +64,7 @@ envoy_cc_library(
     name = "version_includes",
     hdrs = [
         "version.h",
+        ":generate_git_version_number",
         ":generate_version_number",
     ],
     deps = [
