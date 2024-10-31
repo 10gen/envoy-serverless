@@ -54,6 +54,9 @@ build --incompatible_enforce_config_setting_visibility
 test --test_verbose_timeout_warnings
 test --experimental_ui_max_stdouterr_bytes=11712829 #default 1048576
 
+# The TCP/IP implementation in AL2/AL2023 doesn't support RFC4898: TCP Extended Statistics MIB, which leads to compilation failures.
+build --@envoy//source/extensions/transport_sockets/tcp_stats:enabled=false
+
 # Allow tags to influence execution requirements
 common --experimental_allow_tags_propagation
 

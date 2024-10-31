@@ -1,0 +1,79 @@
+FROM docker.io/amazonlinux:2023
+
+ARG BAZELISK_VERSION=1.9.0
+ARG M_VERSION=21550cf21121848413739bfb5cb849bab5735be9
+ARG MONGOSH_VERSION=1.8.0
+ARG GO_VERSION=1.22.1
+
+# perl             : Required to install the MongoDB toolchain.
+# libxcrypt-compat : Adds the shared library /usr/lib64/libcrypt.so.1.
+# which            : Required to run the MongoDB version manager.
+# jq               : Required to add GitHub's keys to the SSH known hosts file.
+# compat-libffi3.1 : Adds the shared library /usr/lib64/libffi.so.6 required by MongoDB toolchain Clang.
+# lcov             : Required to generate code coverage report.
+RUN yum groupinstall -y 'Development Tools'
+RUN yum install -y sudo perl libxcrypt-compat which jq compat-libffi3.1 lcov
+
+# Add GitHub's keys to the SSH known hosts file.
+RUN mkdir -p /root/.ssh && curl --silent https://api.github.com/meta | jq --raw-output '"github.com "+.ssh_keys[]' >> /root/.ssh/known_hosts
+
+# Pre-pack the MongoDB toolchain into the Amazon Linux 2023 image.
+RUN curl -L -o mongodbtoolchain.tar.gz -L http://mongodbtoolchain.build.10gen.cc/toolchain/$([ $(uname -m) = "aarch64" ] && echo "amazon2023-arm64" || echo "amazon2023")/x86_64/latest && \
+  mkdir -p /opt/mongodbtoolchain/revisions && \
+  REVISION=$(tar --list -f mongodbtoolchain.tar.gz | head -1 | sed 's/\/$//') && \
+  tar -C /opt/mongodbtoolchain/revisions -xzvf mongodbtoolchain.tar.gz $REVISION && \
+  /opt/mongodbtoolchain/revisions/$REVISION/scripts/install.sh && \
+  rm mongodbtoolchain.tar.gz
+ENV PATH="/opt/mongodbtoolchain/v4/bin:$PATH"
+ENV LD_LIBRARY_PATH="/opt/mongodbtoolchain/v4/lib"
+ENV CC="/opt/mongodbtoolchain/v4/bin/clang"
+ENV CXX="/opt/mongodbtoolchain/v4/bin/clang++"
+
+# Install Bazel.
+RUN curl -L -o /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/download/v${BAZELISK_VERSION}/bazelisk-linux-$([ $(uname -m) = "aarch64" ] && echo "arm64" || echo "amd64") && \
+  chmod +x /usr/local/bin/bazel
+
+# Silence the error that Git detected dubious ownership in the repository.
+RUN git config --global --add safe.directory '*'
+
+# Install m, the MongoDB version manager.
+RUN curl -L -o /usr/local/bin/m https://raw.githubusercontent.com/aheckmann/m/${M_VERSION}/bin/m && \
+  chmod 755 /usr/local/bin/m
+ENV M_PREFIX="/root/.m"
+ENV M_CONFIRM=0
+ENV PATH="$M_PREFIX/bin:$PATH"
+ENV MONGO_DIR="/root/.m/bin"
+
+# Install mongosh.
+RUN curl -L -o mongosh.tar.gz https://downloads.mongodb.com/compass/mongosh-${MONGOSH_VERSION}-linux-$([ $(uname -m) = "aarch64" ] && echo "arm64" || echo "x64").tgz && \
+  tar -C /usr/local/lib -xzvf mongosh.tar.gz && \
+  chmod 755 /usr/local/lib/mongosh-${MONGOSH_VERSION}-linux-$([ $(uname -m) = "aarch64" ] && echo "arm64" || echo "x64")/bin/mongosh && \
+  ln -s /usr/local/lib/mongosh-${MONGOSH_VERSION}-linux-$([ $(uname -m) = "aarch64" ] && echo "arm64" || echo "x64")/bin/mongosh /usr/local/bin/mongosh && \
+  rm mongosh.tar.gz
+
+# Install go.
+RUN curl -L -o go.tar.gz https://go.dev/dl/go${GO_VERSION}.linux-$([ $(uname -m) = "aarch64" ] && echo "arm64" || echo "amd64").tar.gz && \
+  tar -C /usr/local -xzvf go.tar.gz && \
+  rm go.tar.gz
+ENV PATH="$PATH:/usr/local/go/bin"
+ENV GOROOT="/usr/local/go"
+ENV GOPATH="/root/.local/gopath"
+ENV GOPROXY="https://:@artifactory.corp.mongodb.com/artifactory/api/go/go,direct"
+
+# Allow go modules to work with private repositories.
+ENV GOPRIVATE="github.com/10gen/cloud-agent-common,github.com/10gen/bsonio,github.com/10gen/bsonutil,github.com/10gen/mongoast,github.com/mongodb/mongonet,github.com/10gen/cloud-auth-common"
+RUN git config --global url."ssh://git@github.com/10gen/cloud-agent-common".insteadOf "https://github.com/10gen/cloud-agent-common" && \
+  git config --global url."ssh://git@github.com/10gen/bsonio".insteadOf "https://github.com/10gen/bsonio" && \
+  git config --global url."ssh://git@github.com/10gen/bsonutil".insteadOf "https://github.com/10gen/bsonutil" && \
+  git config --global url."ssh://git@github.com/10gen/mongoast".insteadOf "https://github.com/10gen/mongoast" && \
+  git config --global url."ssh://git@github.com/10gen/mongonet".insteadOf "https://github.com/10gen/mongonet" && \
+  git config --global url."ssh://git@github.com/10gen/cloud-auth-common".insteadOf "https://github.com/10gen/cloud-auth-common"
+
+# Add Atlas Proxy environment variables for serverless.
+ENV SERVERLESS_MODE=true
+ENV SERVERLESS_METRICS_MODE=true
+ENV ENFORCE_LOAD_BALANCED_CONNECTIONS=true
+ENV GRPC_MODE=true
+ENV GRPCBRIDGE_MODE=false
+ENV TEST_MIGRATIONS=false
+
