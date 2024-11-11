@@ -7,9 +7,6 @@ set -xeuo pipefail
 
 source $(dirname "$0")/setup_env.sh
 
-# Create a symlink to the location of the python3 binary. Overwrite existing system python3 binary available on al2023 (and there's no python3 binary in /usr/bin on al2).
-ln -sf /opt/mongodbtoolchain/v4/bin/python3 /usr/bin/python3
-
 # Test targets listed in repo's .bazelci config and includes serverless specific patches.
 export BAZEL_TESTS="//test/common/common/... \
     //test/integration/... //test/exe/... \

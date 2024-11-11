@@ -1,33 +1,26 @@
 FROM docker.io/amazonlinux:2023
 
+ARG CLANG_VERSION=15.0.7
+ARG LLD_VERSION=15.0.7
+ARG LIBSTDCPP_STATIC_VERSION=11.4.1
 ARG BAZELISK_VERSION=1.9.0
 ARG M_VERSION=21550cf21121848413739bfb5cb849bab5735be9
 ARG MONGOSH_VERSION=1.8.0
 ARG GO_VERSION=1.22.1
 
-# perl             : Required to install the MongoDB toolchain.
-# libxcrypt-compat : Adds the shared library /usr/lib64/libcrypt.so.1.
+# sudo             : Required to run various scripts.
 # which            : Required to run the MongoDB version manager.
 # jq               : Required to add GitHub's keys to the SSH known hosts file.
-# compat-libffi3.1 : Adds the shared library /usr/lib64/libffi.so.6 required by MongoDB toolchain Clang.
-# lcov             : Required to generate code coverage report.
+# lcov             : Required to generate code coverage reports.
+# clang            : Required to compile/link the Envoy static binary.
+# lld              : Required to compile/link the Envoy static binary.
+# libstdc++-static : Required to compile/link the Envoy static binary.
 RUN yum groupinstall -y 'Development Tools'
-RUN yum install -y sudo perl libxcrypt-compat which jq compat-libffi3.1 lcov
+RUN yum install -y sudo which jq lcov
+RUN yum install -y clang-${CLANG_VERSION} lld-${LLD_VERSION} libstdc++-static-${LIBSTDCPP_STATIC_VERSION}
 
 # Add GitHub's keys to the SSH known hosts file.
 RUN mkdir -p /root/.ssh && curl --silent https://api.github.com/meta | jq --raw-output '"github.com "+.ssh_keys[]' >> /root/.ssh/known_hosts
-
-# Pre-pack the MongoDB toolchain into the Amazon Linux 2023 image.
-RUN curl -L -o mongodbtoolchain.tar.gz -L http://mongodbtoolchain.build.10gen.cc/toolchain/$([ $(uname -m) = "aarch64" ] && echo "amazon2023-arm64" || echo "amazon2023")/x86_64/latest && \
-  mkdir -p /opt/mongodbtoolchain/revisions && \
-  REVISION=$(tar --list -f mongodbtoolchain.tar.gz | head -1 | sed 's/\/$//') && \
-  tar -C /opt/mongodbtoolchain/revisions -xzvf mongodbtoolchain.tar.gz $REVISION && \
-  /opt/mongodbtoolchain/revisions/$REVISION/scripts/install.sh && \
-  rm mongodbtoolchain.tar.gz
-ENV PATH="/opt/mongodbtoolchain/v4/bin:$PATH"
-ENV LD_LIBRARY_PATH="/opt/mongodbtoolchain/v4/lib"
-ENV CC="/opt/mongodbtoolchain/v4/bin/clang"
-ENV CXX="/opt/mongodbtoolchain/v4/bin/clang++"
 
 # Install Bazel.
 RUN curl -L -o /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/download/v${BAZELISK_VERSION}/bazelisk-linux-$([ $(uname -m) = "aarch64" ] && echo "arm64" || echo "amd64") && \

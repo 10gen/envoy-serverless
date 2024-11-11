@@ -1,12 +1,6 @@
 exec_timeout_secs: 14400 # Tasks will time out after 4 hours.
 
 variables:
-- &amazon_linux2_aarch64
-  distro: al2
-  arch: aarch64
-- &amazon_linux2_x86_64
-  distro: al2
-  arch: x86_64
 - &amazon_linux2023_aarch64
   distro: al2023
   arch: aarch64
@@ -122,32 +116,6 @@ functions:
         AWS_SECRET_ACCESS_KEY: ${SECRET_serverless_proxy_secret_key}
 
 buildvariants:
-- name: al2-aarch64
-  tags: ["pr_check"]
-  display_name: Amazon Linux 2 (aarch64)
-  run_on:
-    # Tasks run in Amazon Linux 2 containers, so the Linux distro doesn't have to match.
-    - rhel92-arm64-large
-  expansions:
-    <<: [*amazon_linux2_aarch64]
-  tasks:
-  - name: docker_build
-  - name: compile
-  - name: test
-
-- name: al2-x86_64
-  tags: ["pr_check"]
-  display_name: Amazon Linux 2 (x86_64)
-  run_on:
-    # Tasks run in Amazon Linux 2 containers, so the Linux distro doesn't have to match.
-    - rhel92-large
-  expansions:
-    <<: [*amazon_linux2_x86_64]
-  tasks:
-  - name: docker_build
-  - name: compile
-  - name: test
-
 - name: al2023-aarch64
   tags: ["pr_check"]
   display_name: Amazon Linux 2023 (aarch64)

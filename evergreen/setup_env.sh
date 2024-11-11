@@ -13,5 +13,5 @@ then
   mkdir -p "${BUILD_DIR}"
 fi
 
-export BAZEL_FLAGS="--config=linux --config=clang --copt=-fsized-deallocation -c opt --action_env=PATH=${PATH} --action_env=CC=${CC} --action_env=CXX=${CXX} --action_env=LD_LIBRARY_PATH=${LD_LIBRARY_PATH} --verbose_failures -k"
+export BAZEL_FLAGS="--config=linux --config=clang --compilation_mode=opt --verbose_failures --subcommands --keep_going"
 export BAZEL_STARTUP_FLAGS="--output_base=${BUILD_DIR}"
